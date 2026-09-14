@@ -1,5 +1,0 @@
-int m
-int n
-m := 42
-n := m
-exit n

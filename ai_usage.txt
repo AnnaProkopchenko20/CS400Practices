@@ -1,0 +1,1014 @@
+Usage not attached but used for: 1) checking and renaming/refactoring the code to fit convention (i like snake case) 
+2) generate test cases based on the described expected test cases in the task description
+3) finish up some code from my comments or half-assed written code to be premium c++ code that uses size_t instead of int and has the helper functions with auto
+4) some wsl troubles and ide debugging
+
+the copy pastes from chats:
+can you rewrite the python sample to c++
+
+Here is the Python skeleton translated into C++ to act as the foundation for your state machine.
+
+```cpp
+#include <iostream>
+#include <vector>
+#include <string>
+#include <map>
+#include <cctype>
+#include <stdexcept>
+
+struct Token {
+    std::string kind;
+    std::string text;
+    int line;
+    int col;
+};
+
+std::vector<std::vector<Token>> lex(const std::string& data) {
+    std::vector<std::vector<Token>> lines;
+    std::vector<Token> tokens;
+    
+    // Explicit state machine
+    enum class State { START, IDENT, NUMBER };
+    State state = State::START;
+    
+    int start = 0;
+    int line = 1;
+    int col = 1;
+    size_t i = 0;
+    
+    std::map<std::string, std::string> KEYWORDS = {
+        {"i32", "keyword"}, {"mut", "keyword"}, {"exit", "keyword"}
+    };
+
+    while (i <= data.length()) { 
+        // Handle the extra end-of-input step defined in the skeleton
+        bool is_eof = (i == data.length());
+        unsigned char b = is_eof ? 0 : data[i];
+
+        if (state == State::START) {
+            if (is_eof) {
+                break;
+            } else if (b == ' ' || b == '\t') {
+                // pass: spaces and tabs are dropped
+            } else if (std::isalpha(b)) {
+                state = State::IDENT;
+                start = i;
+            } else if (b == '\n') {
+                lines.push_back(tokens);
+                tokens.clear();
+                line += 1;
+                col = 0; // Resets to 0, will become 1 after col += 1 at the loop's end
+            } else if (std::isdigit(b)) {
+                state = State::NUMBER;
+                start = i;
+            } else if (b == '{') {
+                tokens.push_back({"block", "{", line, col});
+            } else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+        } 
+        else if (state == State::IDENT) {
+            // Identifiers are letters, digits and _, not starting with a digit
+            if (!is_eof && (std::isalpha(b) || std::isdigit(b) || b == '_')) { 
+                // pass
+            } else {
+                std::string word = data.substr(start, i - start);
+                std::string kind = KEYWORDS.count(word) ? KEYWORDS[word] : "identifier";
+                // Calculate the original starting column of the word
+                int token_col = col - (i - start); 
+                tokens.push_back({kind, word, line, token_col});
+                state = State::START;
+                continue; // continue without advancing to re-read this byte in START
+            }
+        } 
+        else if (state == State::NUMBER) {
+            if (!is_eof && std::isdigit(b)) {
+                // pass
+            } else {
+                std::string word = data.substr(start, i - start);
+                int token_col = col - (i - start);
+                tokens.push_back({"number", word, line, token_col});
+                state = State::START;
+                continue; 
+            }
+        }
+        
+        i += 1;
+        col += 1;
+    }
+    
+    // Append the last line if there is no trailing newline
+    if (!tokens.empty()) {
+        lines.push_back(tokens);
+    }
+    
+    return lines;
+}
+
+```
+
+**Key Implementation Details**
+
+* **Data Structure:** Tokens are kept in a `vector` of `vectors` (one inner vector per line) to make validating statement structures in Task 2 trivial.
+
+
+* **Re-reading Bytes:** The `continue` statement enforces the rule that the scanner must re-examine the byte that just ended a token without advancing `i`.
+
+
+* **EOF Handling:** The loop condition is `i <= data.length()` to guarantee one extra step to process the end of the input and flush any pending tokens, mirroring the Python `None` check.
+
+
+* **Identifier Logic:** The `IDENT` block explicitly allows `_` alongside letters and digits to match the rule that identifiers are letters, digits, and underscores. Keywords are recognized only after the full word is complete.
+
+can you remove the old regex logic and swap it out for comment placeholders
+int main(int argc, char* argv[]) {
+    //args
+    if (argc != 3)
+    {
+        std::cerr << "Expected 2 arguments: input and output file\n";
+        exit(1);
+    }
+
+    std::string input_path(argv[1]);
+    std::string output_path(argv[2]);
+
+    //open and read source file
+    std::ifstream input_file(input_path);
+
+    if (!input_file.is_open()) {
+        std::cerr << "Failed to open input file.\n";
+        exit(1);
+    }
+
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(input_file, line)) {
+        lines.push_back(line);
+    }
+
+    input_file.close();
+
+
+    if (lines.empty()) {
+        std::cerr << "line 1: no exit\n";
+        exit(1);
+    }
+
+    // setup
+    llvm::LLVMContext Context;
+    auto TheModule = std::make_unique<llvm::Module>("practice1", Context);
+    TheModule->setTargetTriple(llvm::sys::getDefaultTargetTriple());
+    llvm::IRBuilder<> Builder(Context);
+
+    llvm::Type *i32Type = llvm::Type::getInt32Ty(Context);
+
+    llvm::FunctionType *MainFuncType = llvm::FunctionType::get(i32Type, false);
+    llvm::Function *MainFunc = llvm::Function::Create(MainFuncType, llvm::Function::ExternalLinkage, "main", TheModule.get());
+    llvm::BasicBlock *EntryBB = llvm::BasicBlock::Create(Context, "entry", MainFunc);
+    Builder.SetInsertPoint(EntryBB);
+
+    llvm::FunctionType *PrintfType = llvm::FunctionType::get(i32Type, {llvm::PointerType::getUnqual(Context)}, true /* var_arg */);
+    llvm::FunctionCallee PrintfFunc = TheModule->getOrInsertFunction("printf", PrintfType);
+
+    llvm::Constant *FmtStr = Builder.CreateGlobalStringPtr("Program exit with result %d\n", "fmt");
+    std::map<std::string, llvm::AllocaInst *> symbols;
+
+    // read the program and compile
+    std::string variable = R"([a-zA-Z_]\w*)";
+    std::string value = R"(-?\d+)";
+    std::string operation = R"([+\-*])";
+    std::string variable_or_constant = R"((?:[a-zA-Z_]\w*|-?\d+))";
+
+    std::regex variable_declaration(std::format(R"(^\s*int\s+({0})\s*$)", variable));
+    std::regex variable_assignment_1arg(std::format(R"(^({0})\s*:=\s*({1})\s*$)", variable, variable_or_constant));
+    std::regex variable_assignment_3arg(std::format(R"(^({0})\s*:=\s*({1})\s*({2})\s*({1})\s*$)", variable, variable_or_constant, operation));
+    std::regex program_exit(std::format(R"(^\s*exit\s+({0})\s*$)", variable_or_constant));
+
+    auto resolveValue = [&](const std::string& token, int line_num) -> llvm::Value* {
+        if (isdigit(token[0]) || (token.length() > 1 && token[0] == '-' && isdigit(token[1]))) {
+            return llvm::ConstantInt::get(i32Type, std::stoi(token), true);
+        } else {
+            if (symbols.find(token) == symbols.end()) {
+                std::cerr << "line " << line_num << ": undeclared variable\n";
+                exit(1);
+            }
+            return Builder.CreateLoad(i32Type, symbols[token], token + "_val");
+        }
+    };
+
+    // compile
+    for (size_t i = 0; i < lines.size(); ++i) {
+        int lineNumber = i + 1;
+        std::smatch matches;
+
+        if (std::regex_match(lines[i], matches, program_exit)) {
+            if (i != lines.size() - 1) {
+                std::cerr << "line " << lineNumber << ": exit not on last line of the program\n";
+                exit(1);
+            }
+            llvm::Value *exitVal = resolveValue(matches[1].str(), lineNumber);
+            Builder.CreateCall(PrintfFunc, {FmtStr, exitVal});
+            Builder.CreateRet(llvm::ConstantInt::get(i32Type, 0, true));
+            continue;
+        }
+
+        if (std::regex_match(lines[i], matches, variable_declaration)) {
+            std::string varName = matches[1].str();
+            if (symbols.find(varName) != symbols.end()) {
+                std::cerr << "line " << lineNumber << ": redeclared variable\n";
+                exit(1);
+            }
+            if (varName == "int" || varName == "exit")
+            {
+                std::cerr << "line " << lineNumber << ": variable name uses reserved symbols int or exit\n";
+                exit(1);
+            }
+            symbols[varName] = Builder.CreateAlloca(i32Type, nullptr, varName);
+        }
+        else if (std::regex_match(lines[i], matches, variable_assignment_1arg)) {
+            std::string targetVar = matches[1].str();
+            if (symbols.find(targetVar) == symbols.end()) {
+                std::cerr << "line " << lineNumber << ": undeclared variable\n";
+                exit(1);
+            }
+
+            llvm::Value *rhsVal = resolveValue(matches[2].str(), lineNumber);
+            Builder.CreateStore(rhsVal, symbols[targetVar]);
+        }
+        else if (std::regex_match(lines[i], matches, variable_assignment_3arg)) {
+            std::string targetVar = matches[1].str();
+            if (symbols.find(targetVar) == symbols.end()) {
+                std::cerr << "line " << lineNumber << ": undeclared variable\n";
+                exit(1);
+            }
+
+            llvm::Value *lhsVal = resolveValue(matches[2].str(), lineNumber);
+            std::string op = matches[3].str();
+            llvm::Value *rhsVal = resolveValue(matches[4].str(), lineNumber);
+
+            llvm::Value *mathResult = nullptr;
+            if (op == "+") {
+                mathResult = Builder.CreateAdd(lhsVal, rhsVal, "addtmp");
+            } else if (op == "-") {
+                mathResult = Builder.CreateSub(lhsVal, rhsVal, "subtmp");
+            } else if (op == "*") {
+                mathResult = Builder.CreateMul(lhsVal, rhsVal, "multmp");
+            }
+
+            Builder.CreateStore(mathResult, symbols[targetVar]);
+        }
+        else {
+            std::cerr << "line " << lineNumber << ": unparsable line\n";
+            exit(1);
+        }
+    }
+
+    if (!std::regex_match(lines.back(), program_exit)) {
+        std::cerr << "line " << lines.size() << ": no exit\n";
+        exit(1);
+    }
+
+
+    // write to file
+    std::error_code error_info;
+    llvm::raw_fd_ostream output_file(output_path, error_info, llvm::sys::fs::OF_None);
+
+    if (error_info) {
+        std::cerr << "Error opening output file: " << error_info.message() << "\n";
+        exit(1);
+    }
+
+    TheModule->print(output_file, nullptr);
+    output_file.flush();
+    output_file.close();
+
+    return 0;
+}
+
+respoonse:
+```cpp
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Type.h>
+#include <llvm/TargetParser/Host.h>
+#include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/FileSystem.h>
+#include <system_error>
+#include <map>
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <vector>
+
+// TODO: Include your Token struct and lex() function here
+
+int main(int argc, char* argv[]) {
+    //args
+    if (argc != 3) {
+        std::cerr << "Expected 2 arguments: input and output file\n";
+        exit(1);
+    }
+
+    std::string input_path(argv[1]);
+    std::string output_path(argv[2]);
+
+    //open and read source file
+    std::ifstream input_file(input_path);
+    if (!input_file.is_open()) {
+        std::cerr << "Failed to open input file.\n";
+        exit(1);
+    }
+
+    // TODO: Read the entire file into a single byte array/string to pass to your lexer
+    std::string source_code((std::istreambuf_iterator<char>(input_file)), std::istreambuf_iterator<char>());
+    input_file.close();
+
+    if (source_code.empty()) {
+        std::cerr << "line 1: no exit\n";
+        exit(1);
+    }
+
+    // TODO: Generate your token stream
+    // std::vector<std::vector<Token>> token_lines = lex(source_code);
+
+    // setup
+    llvm::LLVMContext Context;
+    auto TheModule = std::make_unique<llvm::Module>("practice2", Context);
+    TheModule->setTargetTriple(llvm::sys::getDefaultTargetTriple());
+    llvm::IRBuilder<> Builder(Context);
+
+    llvm::Type *i32Type = llvm::Type::getInt32Ty(Context);
+
+    llvm::FunctionType *MainFuncType = llvm::FunctionType::get(i32Type, false);
+    llvm::Function *MainFunc = llvm::Function::Create(MainFuncType, llvm::Function::ExternalLinkage, "main", TheModule.get());
+    llvm::BasicBlock *EntryBB = llvm::BasicBlock::Create(Context, "entry", MainFunc);
+    Builder.SetInsertPoint(EntryBB);
+
+    llvm::FunctionType *PrintfType = llvm::FunctionType::get(i32Type, {llvm::PointerType::getUnqual(Context)}, true /* var_arg */);
+    llvm::FunctionCallee PrintfFunc = TheModule->getOrInsertFunction("printf", PrintfType);
+
+    llvm::Constant *FmtStr = Builder.CreateGlobalStringPtr("Program exit with result %d\n", "fmt");
+    
+    // TODO: Update your symbol table to track if a variable is 'mut' or 'const' alongside the AllocaInst
+    std::map<std::string, llvm::AllocaInst *> symbols;
+
+    // TODO: Adapt your resolveValue lambda to accept your new Token struct instead of a raw string
+    // auto resolveValue = [&](const Token& token) -> llvm::Value* { ... };
+
+    // compile
+    // TODO: Iterate over your vector of vectors of Tokens instead of string lines
+    /*
+    for (size_t i = 0; i < token_lines.size(); ++i) {
+        const std::vector<Token>& current_line = token_lines[i];
+
+        // TODO: Match Exit Statement (e.g., exit y)
+        if (current_line starts with "exit" keyword) {
+            // ... check for missing arguments
+            // ... resolve exit value
+            // ... Builder.CreateCall, Builder.CreateRet
+            continue;
+        }
+
+        // TODO: Match Variable Declaration (e.g., i32 x {5} or i32 mut y {10})
+        if (current_line starts with "i32" keyword) {
+            // ... check if 'mut' keyword is present
+            // ... check if variable is already in symbols map
+            // ... check for mandatory '{' and '}' tokens
+            // ... resolve initialization values and operators inside brackets
+            // ... Builder.CreateAlloca, Builder.CreateStore
+        }
+        
+        // TODO: Match Variable Assignment (e.g., x := 5 or y := x + 3)
+        else if (current_line contains ":=" operator) {
+            // ... check if variable is declared
+            // ... check if variable is marked as 'mut' (report error if const)
+            // ... resolve RHS values and operations
+            // ... Builder.CreateAdd/Sub/Mul, Builder.CreateStore
+        }
+        
+        else {
+            // Report syntax error using the first token's exact line and column
+            // std::cerr << "line " << current_line[0].line << ":" << current_line[0].col << ": unparsable line\n";
+            // exit(1);
+        }
+    }
+    */
+
+    // TODO: Validate that the final parsed statement was an exit command
+    /*
+    if (!last_statement_was_exit) {
+        std::cerr << "line " << total_lines << ": no exit\n";
+        exit(1);
+    }
+    */
+
+    // write to file
+    std::error_code error_info;
+    llvm::raw_fd_ostream output_file(output_path, error_info, llvm::sys::fs::OF_None);
+
+    if (error_info) {
+        std::cerr << "Error opening output file: " << error_info.message() << "\n";
+        exit(1);
+    }
+
+    TheModule->print(output_file, nullptr);
+    output_file.flush();
+    output_file.close();
+
+    return 0;
+}
+
+```
+
+should i make a small struct for it
+// TODO: Update your symbol table to track if a variable is 'mut' or 'const' alongside the AllocaInst
+std::map<std::string, llvm::AllocaInst *> symbols;
+
+A lightweight struct is exactly the right approach to bundle the mutable flag with the LLVM allocation instruction. It keeps your symbol table clean without needing complicated parallel data structures.
+
+**Symbol Table Struct**
+Define this just above your `main` function:
+
+```cpp
+struct VariableInfo {
+    llvm::AllocaInst* alloca;
+    bool is_mut;
+};
+
+```
+
+**Updated Map**
+Replace your current `std::map` inside `main` with this:
+
+```cpp
+std::map<std::string, VariableInfo> symbols;
+
+```
+
+**How to Use It in Your Loop**
+
+* **During Declaration:** When you encounter an `i32` token, determine if the next token is `mut` and save it to the map.
+```cpp
+bool is_mutable = /* logic to check if 'mut' token exists */;
+symbols[varName] = {Builder.CreateAlloca(i32Type, nullptr, varName), is_mutable};
+
+```
+
+
+* **During Assignment (`:=`):** Before creating the store instruction, verify the flag.
+```cpp
+if (!symbols[targetVar].is_mut) {
+    std::cerr << "line " << lineNumber << ":" << columnNumber 
+              << ": cannot assign to '" << targetVar << "': it is not mut\n";
+    exit(1);
+}
+// Proceed with Builder.CreateStore(rhsVal, symbols[targetVar].alloca);
+
+```
+
+
+* **During Variable Reads:** Access the `.alloca` member when loading a variable for arithmetic or `exit`.
+```cpp
+Builder.CreateLoad(i32Type, symbols[token].alloca, token + "_val");
+
+```
+
+
+wait should i have a separate state for collecting the assignment operator cause otherwise i can't assemble a multibyte token righttt??
+
+also can you just give me syntax for this
+// TODO: Populate this map with "i32", "mut", and "exit" mapping to "keyword"
+std::map<std::string, std::string> KEYWORDS;
+
+
+Handling a multi-byte operator like `:=` in a strict byte-by-byte loop requires transitioning to a temporary state when the first byte (`:`) is encountered. Because the assignment explicitly requires reporting an error if `:` is not followed by `=`, an `ASSIGN` state allows you to inspect the very next byte and either emit the token or throw the exact required error.
+
+**Keyword Map Syntax**
+
+```cpp
+std::map<std::string, std::string> KEYWORDS = {
+    {"i32", "keyword"},
+    {"mut", "keyword"},
+    {"exit", "keyword"}
+};
+
+```
+
+**Implementing the Assignment State**
+Add `ASSIGN` to your `enum class State`. Then, implement the state transition and validation logic:
+
+* **In `State::START`:**
+```cpp
+} else if (b == ':') {
+    state = State::ASSIGN;
+    start = i;
+}
+
+```
+
+
+* **As a new state block:**
+```cpp
+else if (state == State::ASSIGN) {
+    if (!is_eof && b == '=') {
+        tokens.push_back({"operator", ":=", line, col - 1});
+        state = State::START;
+    } else {
+        // Calculates the column of the original ':' byte
+        throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": ':' not followed by '='");
+    }
+}
+
+```
+
+review my code
+fix up the throw error names 
+check for any missed reuiqrements
+std::vector<std::vector<Token>> lex(const std::string& data) {
+    std::vector<std::vector<Token>> lines;
+    std::vector<Token> tokens;
+
+    enum class State { START, IDENT, NUMBER, ASSIGNMENT };
+    State state = State::START;
+
+    int start = 0, line = 1, col = 1;
+    size_t i = 0;
+
+    std::map<std::string, std::string> KEYWORDS = {
+        {"i32", "keyword"},
+        {"mut", "keyword"},
+        {"exit", "keyword"}
+    };
+
+    while (i <= data.length()) {
+        bool is_eof = (i == data.length());
+        unsigned char b = is_eof ? 0 : data[i];
+
+        if (state == State::START) {
+            if (is_eof) {
+                break;
+            }
+            else if (b == ' ' || b == '\t')
+            {
+                // pass
+            }
+            else if (std::isalpha(b))
+            {
+                state = State::IDENT;
+                start = i;
+            }
+            else if (b == '\n')
+            {
+                // check if brace was closed?? or have some sort of hierarchical states where opening a brace starts an open brace state
+                lines.push_back(tokens);
+                tokens.clear();
+                line += 1;
+                col = 0;
+            }
+            else if (std::isdigit(b))
+            {
+                state = State::NUMBER;
+                start = i;
+            } else if (b == '{')
+            {
+                tokens.push_back({"block", "{", line, col});
+            }
+            else if (b == '}')
+            {
+                tokens.push_back({"block", "}", line, col});
+            }
+            else if (b == '+' || b == '-' || b == '*')
+            {
+                tokens.push_back({"operator", std::string(1, b) , line, col});
+
+            }
+            else if (b == ':')
+            {
+                state = State::ASSIGNMENT;
+                start = i;
+            }
+            else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+        }
+        else if (state == State::IDENT) {
+            if (!is_eof && (std::isalpha(b) || std::isdigit(b) || b == '_')) {
+                // pass
+            } else {
+                std::string word = data.substr(start, i - start);
+                std::string kind = KEYWORDS.count(word) ? KEYWORDS[word] : "identifier";
+                tokens.push_back({kind, word, line, col - (int)(i - start)});
+                state = State::START;
+                continue;
+            }
+        }
+        else if (state == State::NUMBER) {
+            if (!is_eof && std::isdigit(b)) {
+                // pass
+            }
+            else if (std::isalpha(b))
+            {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+            else {
+                std::string word = data.substr(start, i - start);
+                tokens.push_back({"number", word, line, col - (int)(i - start)});
+                state = State::START;
+                continue;
+            }
+        }
+        else if (state == State::ASSIGNMENT)
+        {
+            if (b == '=') {
+                tokens.push_back({"operator", ":=" , line, col});
+            }
+            else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+
+        }
+
+        i += 1;
+        col += 1;
+    }
+
+    if (!tokens.empty()) {
+        lines.push_back(tokens);
+    }
+
+    return lines;
+}
+
+
+Your implementation is very close, but you have a critical infinite loop bug in your assignment state and are missing three specific lexical error checks required by the assignment guidelines.
+
+**Required Fixes**
+
+* **Missing State Reset:** Inside `State::ASSIGNMENT`, you forgot to reset `state = State::START;` after emitting `:=`. The lexer would get stuck in the assignment state forever.
+* **Wrong Column for `:=`:** You pushed `col`, which is the column of the `=` byte. You must push `col - 1` to report the position of the first byte (`:`) of the offending token.
+
+
+* **Unclosed Brace Error:** You must report `{ not closed on the same line` with the line and column of the `{` byte. We need an `open_brace_col` integer to track this across bytes until a `}` or `\n` is hit.
+
+
+* **Assignment Error Message:** The assignment explicitly lists `a: not followed by =` as an error to report. The `ASSIGNMENT` fallback must throw this specific message instead of `unexpected byte`.
+
+
+* **Non-ASCII Enforcement:** The rules dictate that any byte above 127 is an unknown byte. You must check `b > 127` in the `START` state.
+
+
+
+**Corrected Code**
+
+```cpp
+std::vector<std::vector<Token>> lex(const std::string& data) {
+    std::vector<std::vector<Token>> lines;
+    std::vector<Token> tokens;
+
+    enum class State { START, IDENT, NUMBER, ASSIGNMENT };
+    State state = State::START;
+
+    int start = 0, line = 1, col = 1;
+    size_t i = 0;
+    
+    // Tracks the column of an open brace to enforce same-line closure
+    int open_brace_col = -1; 
+
+    std::map<std::string, std::string> KEYWORDS = {
+        {"i32", "keyword"},
+        {"mut", "keyword"},
+        {"exit", "keyword"}
+    };
+
+    while (i <= data.length()) {
+        bool is_eof = (i == data.length());
+        unsigned char b = is_eof ? 0 : data[i];
+
+        if (state == State::START) {
+            if (is_eof) {
+                if (open_brace_col != -1) {
+                    throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(open_brace_col) + ": '{' is not closed before the end of the line");
+                }
+                break;
+            }
+            else if (b > 127) {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+            else if (b == ' ' || b == '\t') {
+                // pass
+            }
+            else if (std::isalpha(b)) {
+                state = State::IDENT;
+                start = i;
+            }
+            else if (b == '\n') {
+                if (open_brace_col != -1) {
+                    throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(open_brace_col) + ": '{' is not closed before the end of the line");
+                }
+                lines.push_back(tokens);
+                tokens.clear();
+                line += 1;
+                col = 0; 
+            }
+            else if (std::isdigit(b)) {
+                state = State::NUMBER;
+                start = i;
+            } 
+            else if (b == '{') {
+                tokens.push_back({"block", "{", line, col});
+                open_brace_col = col;
+            }
+            else if (b == '}') {
+                tokens.push_back({"block", "}", line, col});
+                open_brace_col = -1;
+            }
+            else if (b == '+' || b == '-' || b == '*') {
+                tokens.push_back({"operator", std::string(1, b) , line, col});
+            }
+            else if (b == ':') {
+                state = State::ASSIGNMENT;
+                start = i;
+            }
+            else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+        }
+        else if (state == State::IDENT) {
+            if (!is_eof && (std::isalpha(b) || std::isdigit(b) || b == '_')) {
+                // pass
+            } else {
+                std::string word = data.substr(start, i - start);
+                std::string kind = KEYWORDS.count(word) ? KEYWORDS[word] : "identifier";
+                tokens.push_back({kind, word, line, col - (int)(i - start)});
+                state = State::START;
+                continue;
+            }
+        }
+        else if (state == State::NUMBER) {
+            if (!is_eof && std::isdigit(b)) {
+                // pass
+            }
+            else if (!is_eof && std::isalpha(b)) {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected letter inside a number");
+            }
+            else {
+                std::string word = data.substr(start, i - start);
+                tokens.push_back({"number", word, line, col - (int)(i - start)});
+                state = State::START;
+                continue;
+            }
+        }
+        else if (state == State::ASSIGNMENT) {
+            if (b == '=') {
+                tokens.push_back({"operator", ":=" , line, col - 1});
+                state = State::START; // Fixed missing transition
+            }
+            else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": ':' not followed by '='");
+            }
+        }
+
+        i += 1;
+        col += 1;
+    }
+
+    if (!tokens.empty()) {
+        lines.push_back(tokens);
+    }
+
+    return lines;
+}
+
+```
+
+
+review again
+std::vector<std::vector<Token>> lex(const std::string& data) {
+    std::vector<std::vector<Token>> lines;
+    std::vector<Token> tokens;
+
+    enum class State { START, IDENT, NUMBER, ASSIGNMENT };
+    State state = State::START;
+
+    int start = 0, line = 1, col = 1;
+    size_t i = 0;
+
+    int open_brace_col = -1;
+
+    std::map<std::string, std::string> KEYWORDS = {
+        {"i32", "keyword"},
+        {"mut", "keyword"},
+        {"exit", "keyword"}
+    };
+
+    while (i <= data.length()) {
+        bool is_eof = (i == data.length());
+        unsigned char b = is_eof ? 0 : data[i];
+
+        if (!is_eof && b > 127) {
+            throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte");
+        }
+
+        if (state == State::START) {
+            if (is_eof) {
+                if (open_brace_col != -1) {
+                    throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(open_brace_col) + ": '{' is not closed before the end of the line");
+                }
+                break;
+            }
+            else if (b > 127) {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+            else if (b == ' ' || b == '\t') {
+                // pass
+            }
+            else if (std::isalpha(b)) {
+                state = State::IDENT;
+                start = i;
+            }
+            else if (b == '\n') {
+                if (open_brace_col != -1) {
+                    throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(open_brace_col) + ": '{' is not closed before the end of the line");
+                }
+                lines.push_back(tokens);
+                tokens.clear();
+                line += 1;
+                col = 0;
+            }
+            else if (std::isdigit(b)) {
+                state = State::NUMBER;
+                start = i;
+            }
+            else if (b == '{') {
+                tokens.push_back({"block", "{", line, col});
+                open_brace_col = col;
+            }
+            else if (b == '}') {
+                tokens.push_back({"block", "}", line, col});
+                open_brace_col = -1;
+            }
+            else if (b == '+' || b == '-' || b == '*') {
+                tokens.push_back({"operator", std::string(1, b) , line, col});
+            }
+            else if (b == ':') {
+                state = State::ASSIGNMENT;
+                start = i;
+            }
+            else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
+            }
+        }
+        else if (state == State::IDENT) {
+            if (!is_eof && (std::isalpha(b) || std::isdigit(b) || b == '_')) {
+                // pass
+            } else {
+                std::string word = data.substr(start, i - start);
+                std::string kind = KEYWORDS.count(word) ? KEYWORDS[word] : "identifier";
+                tokens.push_back({kind, word, line, col - (int)(i - start)});
+                state = State::START;
+                continue;
+            }
+        }
+        else if (state == State::NUMBER) {
+            if (!is_eof && std::isdigit(b)) {
+                // pass
+            }
+            else if (!is_eof && std::isalpha(b)) {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected letter inside a number");
+            }
+            else {
+                std::string word = data.substr(start, i - start);
+                tokens.push_back({"number", word, line, col - (int)(i - start)});
+                state = State::START;
+                continue;
+            }
+        }
+        else if (state == State::ASSIGNMENT) {
+            if (b == '=') {
+                tokens.push_back({"operator", ":=" , line, col - 1});
+                state = State::START; // Fixed missing transition
+            }
+            else {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": ':' not followed by '='");
+            }
+        }
+
+        i += 1;
+        col += 1;
+    }
+
+    if (!tokens.empty()) {
+        lines.push_back(tokens);
+    }
+
+    return lines;
+}
+
+Your lexer logic is exceptionally solid. You have successfully implemented the state machine rules and all the edge-case error handling required for Task 1.
+
+Here are the final minor tweaks before you wire this into your builder:
+
+* **Remove the Redundant ASCII Check:** You have `else if (b > 127)` inside `State::START`, but you already check `if (!is_eof && b > 127)` globally right before the state machine evaluates. You can safely delete the inner duplicate check.
+* **Non-Printable ASCII Warning:** Your global `b > 127` check currently throws `"unexpected byte"`. This is perfectly fine, as a byte above 127 won't print cleanly in a terminal anyway (unlike an unexpected ASCII character like `$`, which correctly falls through to your final `else` block in `START` to print `"unexpected byte '$'"`).
+
+
+
+**You are completely ready for Task 2 (The Syntax).**
+
+Your next steps are to update your `main()` loop to iterate over `std::vector<std::vector<Token>>` instead of text lines, and replace your regex matches with token index checks (e.g., `if (current_line[0].text == "i32")`).
+
+Are you planning to write a quick helper function to safely fetch tokens from the current line (to prevent out-of-bounds errors if a line is too short), or will you just check `current_line.size()` at the top of each block?
+
+what would be reasonable to put in this hepler
+auto resolveValue = [&](const Token& token) -> llvm::Value*
+{
+
+};
+
+Your `resolveValue` helper should inspect the token's `kind` to decide whether to generate an LLVM constant integer or load a variable from your symbol table. It is also the perfect place to enforce the "declare-before-use" rule required by the assignment.
+
+```cpp
+auto resolveValue = [&](const Token& token) -> llvm::Value* {
+    if (token.kind == "number") {
+        // Generate an LLVM constant for the numeric value
+        return llvm::ConstantInt::get(i32Type, std::stoi(token.text), true);
+    } 
+    else if (token.kind == "identifier") {
+        // Check if the variable exists in the symbol table
+        if (symbols.find(token.text) == symbols.end()) {
+            std::cerr << "line " << token.line << ":" << token.col 
+                      << ": variable '" << token.text << "' is used before its declaration\n";
+            exit(1);
+        }
+        // Load and return the variable's value
+        return Builder.CreateLoad(i32Type, symbols[token.text].alloca, token.text + "_val");
+    } 
+    else {
+        // Fallback for syntax errors if an operator or keyword is passed by mistake
+        std::cerr << "line " << token.line << ":" << token.col 
+                  << ": expected a number or variable, got '" << token.text << "'\n";
+        exit(1);
+    }
+};
+
+```
+
+**Why this works perfectly for Task 2:**
+
+* **Precise Error Reporting:** Because you pass the entire `Token` struct instead of just a raw string, you have immediate access to `token.line` and `token.col` to generate the exact error message format required (`line 1:7: variable 'y' is used before its declaration`).
+
+
+* **No Regex Checking:** Instead of using regex or checking `isdigit()` on the first character to see if it is a number, you safely rely on the `"number"` and `"identifier"` classifications your lexer already figured out.
+
+how can i write this efficiently
+current_line starts with
+current_line contains
+
+The most efficient way to check these conditions is by evaluating the exact index positions of the tokens, rather than searching the entire vector. Because your language enforces strict statement structures (e.g., `exit y` or `x := 5`), you always know exactly where specific keywords and operators must appear on a valid line.
+
+**Starts With (Index 0 Check)**
+Always check `!current_line.empty()` first to prevent out-of-bounds crashes on empty lines.
+
+```cpp
+if (!current_line.empty() && current_line[0].text == "exit") {
+    // Process exit statement
+} 
+else if (!current_line.empty() && current_line[0].text == "i32") {
+    // Process variable declaration
+}
+
+```
+
+**Contains Assignment (Index 1 Check)**
+Instead of a generic "contains" search, check the second token. In an assignment like `x := 5` or `y := x + 3`, the `:=` operator will always be at index `1`.
+
+```cpp
+else if (current_line.size() >= 3 && current_line[1].text == ":=") {
+    std::string targetVar = current_line[0].text;
+    
+    // Process assignment logic
+}
+
+```
+
+**Finding Arithmetic Operators (Iterator Search)**
+If you need to know if an initializer or assignment contains an arithmetic operator (`+`, `-`, `*`), but you aren't sure exactly which index it is at (because `mut` or extra spaces might shift token counts), use `std::find_if`.
+
+```cpp
+#include <algorithm>
+
+// Look for an operator anywhere in the current line
+auto op_it = std::find_if(current_line.begin(), current_line.end(), [](const Token& t) {
+    return t.kind == "operator" && t.text != ":="; 
+});
+
+if (op_it != current_line.end()) {
+    std::string op = op_it->text;
+    // Extract operands relative to the iterator: (op_it - 1) and (op_it + 1)
+} else {
+    // Single value assignment/initialization
+}
+
+```
