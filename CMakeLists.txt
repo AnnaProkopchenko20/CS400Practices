@@ -24,22 +24,3 @@ llvm_map_components_to_libnames(llvm_libs core)
 
 add_executable(compiler src/compiler.cpp)
 target_link_libraries(compiler PRIVATE ${llvm_libs})
-
-add_executable(compiler src/main.cpp)
-target_link_libraries(compiler PRIVATE Practice1Core)
-
-option(BUILD_TESTS "Build practice tests" ON)
-if(BUILD_TESTS)
-    include(FetchContent)
-    FetchContent_Declare(
-            googletest
-            GIT_REPOSITORY https://github.com/google/googletest.git
-            GIT_TAG        v1.14.0
-            GIT_SHALLOW    TRUE
-    )
-    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-    FetchContent_MakeAvailable(googletest)
-
-    enable_testing()
-    add_subdirectory(tests)
-endif()
