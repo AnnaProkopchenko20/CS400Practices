@@ -1,0 +1,4 @@
+i64 big{3000000000}
+i64 mut acc{big * 2}
+acc := acc + 1
+exit acc

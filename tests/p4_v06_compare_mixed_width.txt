@@ -1,0 +1,5 @@
+i32 x{3}
+i64 y{100}
+bool r{x * 2 != y + 5}
+bool s{x == y}
+exit r

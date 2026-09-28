@@ -8,7 +8,7 @@
 using std::string; using std::vector; using std::unique_ptr; using std::make_unique;
 
 struct ProgramNode; struct DeclNode; struct AsmtNode; struct ExitNode;
-struct NumberNode; struct VarNameNode; struct BinaryOpNode;
+struct NumberNode; struct BoolNode; struct VarNameNode; struct BinaryOpNode;
 
 struct Visitor {
     virtual ~Visitor() = default;
@@ -17,6 +17,7 @@ struct Visitor {
     virtual llvm::Value* visit_asmt(AsmtNode&) = 0;
     virtual llvm::Value* visit_exit(ExitNode&) = 0;
     virtual llvm::Value* visit_number(NumberNode&) = 0;
+    virtual llvm::Value* visit_bool(BoolNode&) = 0;
     virtual llvm::Value* visit_var(VarNameNode&) = 0;
     virtual llvm::Value* visit_binop(BinaryOpNode&) = 0;
 };
@@ -37,16 +38,17 @@ protected:
 };
 
 struct StmtNode : Node { using Node::Node; };
-struct ExprNode : Node { using Node::Node; };
+struct ExprNode : Node { using Node::Node; string type; };
 struct ValueNode : ExprNode { using ExprNode::ExprNode; };
 
 struct NumberNode : ValueNode {
-    int value;
-    NumberNode(int l, int c, int v) : ValueNode(l, c), value(v) {}
+    string text;          // digits exactly as written; the checker decides i32 / i64 / too big
+    long long value = 0;  // filled in by the SemanticChecker
+    NumberNode(int l, int c, string t) : ValueNode(l, c), text(std::move(t)) {}
 
     void dump(int d) const override
     {
-        indent(d); std::cout << "Const " << value << "\n";
+        indent(d); std::cout << "Const " << text << "\n";
     }
 
     llvm::Value* accept(Visitor& v) override
@@ -57,6 +59,8 @@ struct NumberNode : ValueNode {
 
 struct VarNameNode : ValueNode {
     string name;
+    DeclNode* decl = nullptr;   // set by the SemanticChecker
+
     VarNameNode(int l, int c, string n) : ValueNode(l, c), name(std::move(n)) {}
 
     void dump(int d) const override
@@ -70,9 +74,11 @@ struct VarNameNode : ValueNode {
     }
 };
 struct BinaryOpNode : ExprNode {
-    char op; unique_ptr<ExprNode> left, right;
-    BinaryOpNode(int l, int c, char o, unique_ptr<ExprNode> lhs, unique_ptr<ExprNode> rhs)
-        : ExprNode(l, c), op(o), left(std::move(lhs)), right(std::move(rhs)) {}
+    string op;   // "+", "-", "*", "==" or "!="
+    unique_ptr<ExprNode> left, right;
+
+    BinaryOpNode(int l, int c, string o, unique_ptr<ExprNode> lhs, unique_ptr<ExprNode> rhs)
+        : ExprNode(l, c), op(std::move(o)), left(std::move(lhs)), right(std::move(rhs)) {}
 
     void dump(int d) const override
     {
@@ -85,14 +91,32 @@ struct BinaryOpNode : ExprNode {
         return v.visit_binop(*this);
     }
 };
-struct DeclNode : StmtNode {
-    string name; bool is_mut; unique_ptr<ExprNode> expr;
-    DeclNode(int l, int c, string n, bool m, unique_ptr<ExprNode> e)
-        : StmtNode(l, c), name(std::move(n)), is_mut(m), expr(std::move(e)) {}
+struct BoolNode : ValueNode {   // the literals true / false
+    bool value;
+    BoolNode(int l, int c, bool v) : ValueNode(l, c), value(v) {}
 
     void dump(int d) const override
     {
-        indent(d); std::cout << "Decl " << name << (is_mut ? " mut" : " const") << "\n";
+        indent(d); std::cout << "Bool " << (value ? "true" : "false") << "\n";
+    }
+
+    llvm::Value* accept(Visitor& v) override
+    {
+        return v.visit_bool(*this);
+    }
+};
+struct DeclNode : StmtNode {
+    string type_name;   // "i32", "i64" or "bool"
+    string name;
+    bool is_mut;
+    unique_ptr<ExprNode> expr;
+
+    DeclNode(int l, int c, string t, string n, bool m, unique_ptr<ExprNode> e)
+        : StmtNode(l, c), type_name(std::move(t)), name(std::move(n)), is_mut(m), expr(std::move(e)) {}
+
+    void dump(int d) const override
+    {
+        indent(d); std::cout << "Decl " << name << " " << type_name << (is_mut ? " mut" : " const") << "\n";
         expr->dump(d + 1);
     }
 
@@ -102,7 +126,10 @@ struct DeclNode : StmtNode {
     }
 };
 struct AsmtNode : StmtNode {
-    string name; unique_ptr<ExprNode> expr;
+    string name;
+    unique_ptr<ExprNode> expr;
+    DeclNode* decl = nullptr;   // set by the SemanticChecker
+
     AsmtNode(int l, int c, string n, unique_ptr<ExprNode> e)
         : StmtNode(l, c), name(std::move(n)), expr(std::move(e)) {}
     void dump(int d) const override

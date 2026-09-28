@@ -1,0 +1,4 @@
+i32 a{7}
+i64 b{7}
+bool r{a != b}
+exit r

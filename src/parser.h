@@ -1,5 +1,4 @@
 #pragma once
-#include <charconv>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -31,6 +30,11 @@ public:
     const {
         const Token* t = peek();
         return t && t->kind == kind && (text.empty() || t->text == text);
+    }
+
+    bool at_type() const
+    {
+        return at("keyword", "i32") || at("keyword", "i64") || at("keyword", "bool");
     }
 
     static string where(int line, int col)
@@ -94,21 +98,21 @@ public:
         }
         if (!exit_node)
             throw std::runtime_error(where(last_line, 1) + "no exit");
-        
+
         return make_unique<ProgramNode>(first_line, first_col, std::move(stmts), std::move(exit_node));
     }
 
     // statement ::= declaration | assignment
     unique_ptr<StmtNode> parse_statement() {
-        if (at("keyword", "i32")) return parse_decl();
+        if (at_type()) return parse_decl();
         if (at("identifier")) return parse_assign();
 
         throw error_at(*peek(), "cannot start a statement with '" + peek()->text + "'");
     }
 
-    // declaration ::= "i32" [ "mut" ] identifier "{" expression "}"
+    // declaration ::= type [ "mut" ] identifier "{" expression "}"
     unique_ptr<StmtNode> parse_decl() {
-        eat();
+        Token type = eat();
 
         bool is_mut = at("keyword", "mut");
         if (is_mut) eat();
@@ -124,7 +128,7 @@ public:
         auto init = parse_expr();
         expect("block", "}", "'}'");
 
-        return make_unique<DeclNode>(name.line, name.col, name.text, is_mut, std::move(init));
+        return make_unique<DeclNode>(name.line, name.col, type.text, name.text, is_mut, std::move(init));
     }
 
     // assignment ::= identifier ":=" expression
@@ -149,8 +153,22 @@ public:
         return make_unique<ExitNode>(kw.line, kw.col, std::move(value));
     }
 
-    // expression ::= term { ( "+" | "-" ) term }
+    // expression  ::= arith [ ( "==" | "!=" ) arith ]
     unique_ptr<ExprNode> parse_expr()
+    {
+        unique_ptr<ExprNode> node = parse_arith();
+
+        if (at("operator", "==") || at("operator", "!="))   // 'if', not 'while': one comparison only
+        {
+            Token op = eat();
+            auto right = parse_arith();
+            node = make_unique<BinaryOpNode>(op.line, op.col, op.text, std::move(node), std::move(right));
+        }
+        return node;
+    }
+
+    // arith ::= term { ( "+" | "-" ) term }
+    unique_ptr<ExprNode> parse_arith()
     {
         unique_ptr<ExprNode> node = parse_term();
 
@@ -158,7 +176,7 @@ public:
         {
             Token op = eat();
             auto right = parse_term();
-            node = make_unique<BinaryOpNode>(op.line, op.col, op.text[0], std::move(node), std::move(right));
+            node = make_unique<BinaryOpNode>(op.line, op.col, op.text, std::move(node), std::move(right));
         }
         return node;
     }
@@ -172,13 +190,13 @@ public:
         {
             Token op = eat();
             auto right = parse_factor();
-            node = make_unique<BinaryOpNode>(op.line, op.col, op.text[0], std::move(node), std::move(right));
+            node = make_unique<BinaryOpNode>(op.line, op.col, op.text, std::move(node), std::move(right));
         }
 
         return node;
     }
 
-    // factor ::= number | identifier
+    // factor ::= number | "true" | "false" | identifier
     unique_ptr<ExprNode> parse_factor() {
 
         if (at("identifier")) {
@@ -188,11 +206,12 @@ public:
 
         if (at("number")) {
             Token t = eat();
-            int value = 0;
-            auto [ptr, ec] = std::from_chars(t.text.data(), t.text.data() + t.text.size(), value);
-            if (ec != std::errc() || ptr != t.text.data() + t.text.size())
-                throw error_at(t, "number '" + t.text + "' does not fit into i32");
-            return make_unique<NumberNode>(t.line, t.col, value);
+            return make_unique<NumberNode>(t.line, t.col, t.text);   // range is the checker's job
+        }
+
+        if (at("keyword", "true") || at("keyword", "false")) {
+            Token t = eat();
+            return make_unique<BoolNode>(t.line, t.col, t.text == "true");
         }
 
         throw error("expected a constant or a variable");

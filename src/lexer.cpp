@@ -10,7 +10,7 @@ std::vector<std::vector<Token>> lex(const std::string& data)
     std::vector<std::vector<Token>> lines;
     std::vector<Token> tokens;
 
-    enum class State { START, IDENT, NUMBER, ASSIGNMENT };
+    enum class State { START, IDENT, NUMBER, ASSIGNMENT, EQUALITY, NEGATION};
     State state = State::START;
 
     int start = 0, line = 1, col = 1;
@@ -22,7 +22,11 @@ std::vector<std::vector<Token>> lex(const std::string& data)
     {
         {"i32", "keyword"},
         {"mut", "keyword"},
-        {"exit", "keyword"}
+        {"exit", "keyword"},
+        {"i64", "keyword"},
+        {"bool", "keyword"},
+        {"true", "keyword"},
+        {"false", "keyword"}
     };
 
     while (i <= data.length())
@@ -89,6 +93,16 @@ std::vector<std::vector<Token>> lex(const std::string& data)
                 state = State::ASSIGNMENT;
                 start = i;
             }
+            else if (b == '=')
+            {
+                state = State::EQUALITY;
+                start = i;
+            }
+            else if (b == '!')
+            {
+                state = State::NEGATION;
+                start = i;
+            }
             else
             {
                 throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": unexpected byte '" + std::string(1, b) + "'");
@@ -135,6 +149,30 @@ std::vector<std::vector<Token>> lex(const std::string& data)
             else
             {
                 throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": ':' not followed by '='");
+            }
+        }
+        else if (state == State::EQUALITY)
+        {
+            if (b == '=')
+            {
+                tokens.push_back({"operator", "==", line, col - 1});
+                state = State::START;
+            }
+            else
+            {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": expected '==' (a single '=' is not an operator)");
+            }
+        }
+        else if (state == State::NEGATION)
+        {
+            if (b == '=')
+            {
+                tokens.push_back({"operator", "!=", line, col - 1});
+                state = State::START;
+            }
+            else
+            {
+                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": expected '!=' (a single '!' is not an operator)");
             }
         }
 
