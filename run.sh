@@ -1,49 +1,45 @@
 #!/bin/bash
+# Build the compiler, run every tests/*.txt and compare with its .expected file.
+# Valid program  -> expected = what `lli` prints
+# Invalid program -> expected = the compiler's stderr line
+# Optional: tests/NAME.ast is compared with `compiler --ast`.
 
 set -e
-
-echo "Building the compiler via CMake..."
 mkdir -p build
-cd build
-# Standard CMake configuration (defaults to 'Unix Makefiles' on Ubuntu)
-cmake ..
-# Build the 'compiler' target
-cmake --build . --target compiler
-cd ..
-
+(cd build && cmake .. > /dev/null && cmake --build . --target compiler)
 set +e
 
-echo -e "\nStarting Test Suite..."
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+pass=0; fail=0
 
-for test_file in tests/*.txt; do
-    # Skip CMakeLists.txt if the glob picks it up
-    if [[ "$(basename "$test_file")" == "CMakeLists.txt" ]]; then
-        continue
-    fi
-
-    echo "--------------------------------------------------"
-    echo "Testing: $test_file"
-
-    # Run the compiled executable
-    ./build/compiler "$test_file" "output.ll"
-    COMPILER_EXIT_CODE=$?
-
-    if [ $COMPILER_EXIT_CODE -eq 0 ]; then
-        echo "-> Compiler generated output.ll successfully."
-
-        # Compile IR to object file and link it to an executable
-        llc -filetype=obj -relocation-model=pic output.ll -o output.o
-        clang -fPIE output.o -o program
-
-        echo "-> Running program:"
-        ./program
-
-        # Clean up the generated artifacts
-        rm output.ll output.o program
+check() {  # label actual_file expected_file
+    if [ ! -f "$3" ]; then
+        echo "MISSING  $1  (no $3)"; fail=$((fail+1))
+    elif diff -u "$3" "$2" > "$tmp/diff"; then
+        echo "PASS     $1"; pass=$((pass+1))
     else
-        echo "-> Compiler rejected the file with exit code $COMPILER_EXIT_CODE (Expected for fail tests)."
+        echo "FAIL     $1"; cat "$tmp/diff"; fail=$((fail+1))
+    fi
+}
+
+for t in tests/*.txt; do
+    base="${t%.txt}"; name=$(basename "$base")
+    rm -f "$tmp/out.ll"
+
+    ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+    if [ $? -eq 0 ]; then
+        lli "$tmp/out.ll" > "$tmp/actual" 2>&1
+    elif [ -f "$tmp/out.ll" ]; then
+        echo "FAIL     $name  (output file written despite error)"; fail=$((fail+1))
+    fi
+    check "$name" "$tmp/actual" "$base.expected"
+
+    if [ -f "$base.ast" ]; then
+        ./build/compiler --ast "$t" > "$tmp/ast" 2>&1
+        check "$name [ast]" "$tmp/ast" "$base.ast"
     fi
 done
 
-echo "--------------------------------------------------"
-echo "Test suite finished."
+echo "-----------------------------"
+echo "passed: $pass   failed: $fail"
+[ "$fail" -eq 0 ]

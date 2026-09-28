@@ -1,0 +1,20 @@
+practice3 ebnf:
+
+program ::= { statement } exit_stmt
+statement ::= declaration | assignment
+declaration ::= "i32" [ "mut" ] identifier "{" expression "}"
+assignment ::= identifier ":=" expression
+exit_stmt ::= "exit" factor
+expression ::= term { ( "+" | "-" ) term }
+term ::= factor { "*" factor }
+factor ::= number | identifier
+
+practice2 ebnf:
+
+program ::= { statement } exit_stmt
+statement ::= declaration | assignment
+declaration ::= "i32" [ "mut" ] identifier "{" value "}"
+assignment ::= identifier ":=" value
+exit_stmt ::= "exit" operand
+value ::= operand [ ( "+" | "-" | "*" ) operand ]
+operand ::= number | identifier
