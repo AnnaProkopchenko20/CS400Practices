@@ -1,3 +1,0 @@
-used to plan the quick completion
-partially generate or translate some code from python to c++
-claude chat link: https://claude.ai/share/d314990f-6eed-4a38-bf08-f5a98b193113

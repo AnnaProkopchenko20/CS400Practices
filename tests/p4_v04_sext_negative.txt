@@ -1,0 +1,5 @@
+i32 z{0}
+i32 m{z - 5}
+i64 w{m}
+i64 s{m + w}
+exit s

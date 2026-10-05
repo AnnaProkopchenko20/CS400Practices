@@ -18,3 +18,16 @@ assignment ::= identifier ":=" value
 exit_stmt ::= "exit" operand
 value ::= operand [ ( "+" | "-" | "*" ) operand ]
 operand ::= number | identifier
+
+practice4 ebnf:
+
+program     ::= { statement } exit_stmt
+statement   ::= declaration | assignment
+declaration ::= type [ "mut" ] identifier "{" expression "}"
+assignment  ::= identifier ":=" expression
+exit_stmt   ::= "exit" factor
+type        ::= "i32" | "i64" | "bool"
+expression  ::= arith [ ( "==" | "!=" ) arith ]
+arith       ::= term { ( "+" | "-" ) term }
+term        ::= factor { "*" factor }
+factor      ::= number | "true" | "false" | identifier
