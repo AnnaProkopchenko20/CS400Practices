@@ -1,0 +1,10 @@
+i32 x{7}
+if x == 7
+{
+    exit 1
+}
+else
+{
+    exit 2
+}
+exit 3

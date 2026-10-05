@@ -1,0 +1,2 @@
+bool c{!}
+exit c

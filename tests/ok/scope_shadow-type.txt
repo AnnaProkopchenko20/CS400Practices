@@ -1,0 +1,11 @@
+i32 mut x{1}
+if true
+{
+    bool x{false}
+    if !x
+    {
+        i64 mut x{5000000000}
+        x := x + 1
+    }
+}
+exit x

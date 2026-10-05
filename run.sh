@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the compiler, run every tests/*.txt and compare with its .expected file.
+# Build the compiler, run every tests/ok/*.txt and tests/err/*.txt and compare with its .expected file.
 # Valid program  -> expected = what `lli` prints
 # Invalid program -> expected = the compiler's stderr line
 # Optional: tests/NAME.ast is compared with `compiler --ast`.
@@ -22,7 +22,7 @@ check() {  # label actual_file expected_file
     fi
 }
 
-for t in tests/*.txt; do
+for t in tests/ok/*.txt tests/err/*.txt; do
     base="${t%.txt}"; name=$(basename "$base")
     rm -f "$tmp/out.ll"
 

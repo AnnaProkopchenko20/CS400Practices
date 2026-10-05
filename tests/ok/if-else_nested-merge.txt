@@ -1,0 +1,19 @@
+i32 mut r{0}
+bool a{true}
+bool b{false}
+if a
+{
+    if b
+    {
+        r := 1
+    }
+    else
+    {
+        r := 2
+    }
+}
+else
+{
+    r := 3
+}
+exit r

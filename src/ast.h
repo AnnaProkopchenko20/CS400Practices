@@ -9,6 +9,7 @@ using std::string; using std::vector; using std::unique_ptr; using std::make_uni
 
 struct ProgramNode; struct DeclNode; struct AsmtNode; struct ExitNode;
 struct NumberNode; struct BoolNode; struct VarNameNode; struct BinaryOpNode;
+struct IfNode; struct BlockNode; struct NotNode; struct WhileNode;
 
 struct Visitor {
     virtual ~Visitor() = default;
@@ -20,9 +21,11 @@ struct Visitor {
     virtual llvm::Value* visit_bool(BoolNode&) = 0;
     virtual llvm::Value* visit_var(VarNameNode&) = 0;
     virtual llvm::Value* visit_binop(BinaryOpNode&) = 0;
+    virtual llvm::Value* visit_if(IfNode&) = 0;
+    virtual llvm::Value* visit_block(BlockNode&) = 0;
+    virtual llvm::Value* visit_not(NotNode&) = 0;
+    virtual llvm::Value* visit_while(WhileNode&) = 0;
 };
-
-
 
 struct Node {
     int line, col;
@@ -73,6 +76,7 @@ struct VarNameNode : ValueNode {
         return v.visit_var(*this);
     }
 };
+
 struct BinaryOpNode : ExprNode {
     string op;   // "+", "-", "*", "==" or "!="
     unique_ptr<ExprNode> left, right;
@@ -91,6 +95,7 @@ struct BinaryOpNode : ExprNode {
         return v.visit_binop(*this);
     }
 };
+
 struct BoolNode : ValueNode {   // the literals true / false
     bool value;
     BoolNode(int l, int c, bool v) : ValueNode(l, c), value(v) {}
@@ -105,6 +110,25 @@ struct BoolNode : ValueNode {   // the literals true / false
         return v.visit_bool(*this);
     }
 };
+
+struct NotNode : ExprNode {
+    unique_ptr<ExprNode> expr;
+
+    NotNode(int l, int c, unique_ptr<ExprNode> e)
+        : ExprNode(l, c), expr(std::move(e)) {}
+
+    void dump(int d) const override
+    {
+        indent(d); std::cout << "Not\n";
+        expr->dump(d + 1);
+    }
+
+    llvm::Value* accept(Visitor& v) override
+    {
+        return v.visit_not(*this);
+    }
+};
+
 struct DeclNode : StmtNode {
     string type_name;   // "i32", "i64" or "bool"
     string name;
@@ -125,6 +149,7 @@ struct DeclNode : StmtNode {
         return v.visit_decl(*this);
     }
 };
+
 struct AsmtNode : StmtNode {
     string name;
     unique_ptr<ExprNode> expr;
@@ -132,6 +157,7 @@ struct AsmtNode : StmtNode {
 
     AsmtNode(int l, int c, string n, unique_ptr<ExprNode> e)
         : StmtNode(l, c), name(std::move(n)), expr(std::move(e)) {}
+
     void dump(int d) const override
     {
         indent(d); std::cout << "Assign " << name << "\n";
@@ -143,9 +169,11 @@ struct AsmtNode : StmtNode {
         return v.visit_asmt(*this);
     }
 };
+
 struct ExitNode : Node {
     unique_ptr<ExprNode> expr;
     ExitNode(int l, int c, unique_ptr<ExprNode> e) : Node(l, c), expr(std::move(e)) {}
+
     void dump(int d) const override
     {
         indent(d); std::cout << "Exit\n"; expr->dump(d + 1);
@@ -156,11 +184,87 @@ struct ExitNode : Node {
         return v.visit_exit(*this);
     }
 };
+
+struct BlockNode : Node {
+    vector<unique_ptr<StmtNode>> stmts;
+    unique_ptr<ExitNode> exit_stmt;
+
+    BlockNode(int l, int c, vector<unique_ptr<StmtNode>> s, unique_ptr<ExitNode> e = nullptr)
+        : Node(l, c), stmts(std::move(s)), exit_stmt(std::move(e)) {}
+
+    void dump(int d) const override
+    {
+        indent(d); std::cout << "Block\n";
+        for (auto& s : stmts)
+        {
+            s->dump(d + 1);
+        }
+        if (exit_stmt)
+        {
+            exit_stmt->dump(d + 1);
+        }
+    }
+
+    llvm::Value* accept(Visitor& v) override
+    {
+        return v.visit_block(*this);
+    }
+};
+
+struct IfNode : StmtNode {
+    unique_ptr<ExprNode> cond;
+    unique_ptr<BlockNode> then_block;
+    unique_ptr<BlockNode> else_block;
+
+    IfNode(int l, int c, unique_ptr<ExprNode> cond, unique_ptr<BlockNode> then_b, unique_ptr<BlockNode> else_b = nullptr)
+        : StmtNode(l, c), cond(std::move(cond)), then_block(std::move(then_b)), else_block(std::move(else_b)) {}
+
+    void dump(int d) const override
+    {
+        indent(d); std::cout << "If\n";
+        cond->dump(d + 1);
+        then_block->dump(d + 1);
+        if (else_block)
+        {
+            else_block->dump(d + 1);
+        }
+    }
+
+    llvm::Value* accept(Visitor& v) override
+    {
+        return v.visit_if(*this);
+    }
+};
+
+struct WhileNode : StmtNode {
+    unique_ptr<ExprNode> cond;
+    unique_ptr<BlockNode> body;
+
+    WhileNode(int l, int c, unique_ptr<ExprNode> cond, unique_ptr<BlockNode> body)
+        : StmtNode(l, c), cond(std::move(cond)), body(std::move(body)) {}
+
+    void dump(int d) const override
+    {
+        indent(d); std::cout << "While\n";
+        cond->dump(d + 1);
+        body->dump(d + 1);
+    }
+
+    llvm::Value* accept(Visitor& v) override
+    {
+        return v.visit_while(*this);
+    }
+};
+
 struct ProgramNode : Node {
-    vector<unique_ptr<StmtNode>> stmts; unique_ptr<ExitNode> exit_stmt;
+    vector<unique_ptr<StmtNode>> stmts;
+    unique_ptr<ExitNode> exit_stmt;
+
     ProgramNode(int l, int c, vector<unique_ptr<StmtNode>> s, unique_ptr<ExitNode> e)
-        :Node(l, c), stmts(std::move(s)), exit_stmt(std::move(e)) {}
-    void dump(int d) const override {
+        : Node(l, c), stmts(std::move(s)), exit_stmt(std::move(e)) {}
+
+    void dump(int d) const override
+    {
         indent(d); std::cout << "Program\n";
         for (auto& s : stmts)
         {

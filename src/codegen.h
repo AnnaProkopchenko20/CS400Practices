@@ -11,13 +11,12 @@
 #include <llvm/TargetParser/Host.h>
 #include "ast.h"
 
-// Generates IR from a tree the SemanticChecker has already accepted.
-// It performs no checks and no lookups by name: every expression carries its
-// type (node.type) and every variable/assignment carries its declaration (node.decl).
+
 struct CodeGen : Visitor {
     llvm::LLVMContext context;
     std::unique_ptr<llvm::Module> module;
     llvm::IRBuilder<> builder;
+    llvm::Function* main_func = nullptr;
     std::map<DeclNode*, llvm::AllocaInst*> allocas;   // declaration -> its stack slot
     llvm::Type* i1_type;
     llvm::Type* i32_type;
@@ -29,7 +28,7 @@ struct CodeGen : Visitor {
     llvm::Constant* false_str;
 
     CodeGen() : builder(context) {
-        module = std::make_unique<llvm::Module>("practice4", context);
+        module = std::make_unique<llvm::Module>("practice5", context);
         module->setTargetTriple(llvm::sys::getDefaultTargetTriple());
 
         i1_type = llvm::Type::getInt1Ty(context);
@@ -51,9 +50,22 @@ struct CodeGen : Visitor {
         return value;
     }
 
+    // Every alloca goes to the start of the entry block, wherever `builder` is.
+    // A separate builder is used, so the main one keeps its position.
+    llvm::AllocaInst* create_entry_alloca(llvm::Type* type, const std::string& name) {
+        llvm::BasicBlock& entry = main_func->getEntryBlock();
+        llvm::IRBuilder<> tmp(&entry, entry.begin());
+        return tmp.CreateAlloca(type, nullptr, name);
+    }
+
+    // true if the block the builder is positioned at already ends with br / ret
+    bool current_block_terminated() {
+        return builder.GetInsertBlock()->getTerminator() != nullptr;
+    }
+
     llvm::Value* visit_program(ProgramNode& n) override {
         llvm::FunctionType* main_func_type = llvm::FunctionType::get(i32_type, false);
-        llvm::Function* main_func = llvm::Function::Create(main_func_type, llvm::Function::ExternalLinkage, "main", module.get());
+        main_func = llvm::Function::Create(main_func_type, llvm::Function::ExternalLinkage, "main", module.get());
         llvm::BasicBlock* entry_bb = llvm::BasicBlock::Create(context, "entry", main_func);
         builder.SetInsertPoint(entry_bb);
 
@@ -78,8 +90,8 @@ struct CodeGen : Visitor {
         llvm::Value* val = n.expr->accept(*this);
         val = coerce(val, n.expr->type, n.type_name);
 
-        llvm::AllocaInst* slot = builder.CreateAlloca(llvm_type(n.type_name), nullptr, n.name);
-        builder.CreateStore(val, slot);
+        llvm::AllocaInst* slot = create_entry_alloca(llvm_type(n.type_name), n.name);
+        builder.CreateStore(val, slot);   // the store stays in the current block
 
         allocas[&n] = slot;
 
@@ -100,7 +112,6 @@ struct CodeGen : Visitor {
 
         if (n.expr->type == "bool")
         {
-            // no branches yet: pick the string with a select
             llvm::Value* text = builder.CreateSelect(val, true_str, false_str, "booltext");
             builder.CreateCall(printf_func, {fmt_bool, text});
         }
@@ -110,7 +121,7 @@ struct CodeGen : Visitor {
             builder.CreateCall(printf_func, {fmt_int, val});
         }
 
-        builder.CreateRet(llvm::ConstantInt::get(i32_type, 0));
+        builder.CreateRet(llvm::ConstantInt::get(i32_type, 0));   // terminates the current block
 
         return nullptr;
     }
@@ -149,5 +160,70 @@ struct CodeGen : Visitor {
 
         if (n.op == "==") return builder.CreateICmpEQ(l, r, "eqtmp");
         return builder.CreateICmpNE(l, r, "netmp");
+    }
+
+    llvm::Value* visit_if(IfNode& n) override {
+        llvm::Value* cond = n.cond->accept(*this);
+
+        llvm::BasicBlock* then_bb = llvm::BasicBlock::Create(context, "then", main_func);
+        llvm::BasicBlock* else_bb = n.else_block ? llvm::BasicBlock::Create(context, "else", main_func) : nullptr;
+        llvm::BasicBlock* merge_bb = llvm::BasicBlock::Create(context, "merge", main_func);
+
+        builder.CreateCondBr(cond, then_bb, else_bb ? else_bb : merge_bb);   // ends the current block
+
+        builder.SetInsertPoint(then_bb);
+        n.then_block->accept(*this);
+        if (!current_block_terminated())   // current block, not then_bb: a nested if moved the builder
+            builder.CreateBr(merge_bb);
+
+        if (else_bb)
+        {
+            builder.SetInsertPoint(else_bb);
+            n.else_block->accept(*this);
+            if (!current_block_terminated())
+                builder.CreateBr(merge_bb);
+        }
+
+        builder.SetInsertPoint(merge_bb);   // whatever follows the if goes here
+
+        return nullptr;
+    }
+
+    llvm::Value* visit_block(BlockNode& n) override {
+        // a block has no IR of its own: its code goes to wherever the builder is
+        for (auto& s : n.stmts)
+        {
+            s->accept(*this);
+        }
+        if (n.exit_stmt)
+            n.exit_stmt->accept(*this);
+
+        return nullptr;
+    }
+
+    llvm::Value* visit_not(NotNode& n) override {
+        llvm::Value* v = n.expr->accept(*this);
+        return builder.CreateNot(v, "nottmp");
+    }
+
+    llvm::Value* visit_while(WhileNode& n) override {
+        llvm::BasicBlock* cond_bb = llvm::BasicBlock::Create(context, "while.cond", main_func);
+        llvm::BasicBlock* body_bb = llvm::BasicBlock::Create(context, "while.body", main_func);
+        llvm::BasicBlock* end_bb = llvm::BasicBlock::Create(context, "while.end", main_func);
+
+        builder.CreateBr(cond_bb);   // enter the loop from the current block
+
+        builder.SetInsertPoint(cond_bb);
+        llvm::Value* cond = n.cond->accept(*this);
+        builder.CreateCondBr(cond, body_bb, end_bb);
+
+        builder.SetInsertPoint(body_bb);
+        n.body->accept(*this);
+        if (!current_block_terminated())
+            builder.CreateBr(cond_bb);   // the back edge
+
+        builder.SetInsertPoint(end_bb);
+
+        return nullptr;
     }
 };

@@ -1,3 +1,33 @@
+practice5 ebnf:
+
+program     ::= { statement } exit_stmt
+statement   ::= declaration | assignment | if_stmt | while_stmt
+declaration ::= type [ "mut" ] identifier "{" expression "}"
+assignment  ::= identifier ":=" expression
+if_stmt     ::= "if" expression NL block [ "else" NL block ]
+while_stmt  ::= "while" expression NL block
+block       ::= "{" NL { statement } [ exit_stmt NL ] "}" NL
+exit_stmt   ::= "exit" factor
+type        ::= "i32" | "i64" | "bool"
+expression  ::= arith [ ( "==" | "!=" ) arith ]
+arith       ::= term { ( "+" | "-" ) term }
+term        ::= factor { "*" factor }
+factor      ::= number | "true" | "false" | identifier | "!" factor
+
+
+practice4 ebnf:
+
+program     ::= { statement } exit_stmt
+statement   ::= declaration | assignment
+declaration ::= type [ "mut" ] identifier "{" expression "}"
+assignment  ::= identifier ":=" expression
+exit_stmt   ::= "exit" factor
+type        ::= "i32" | "i64" | "bool"
+expression  ::= arith [ ( "==" | "!=" ) arith ]
+arith       ::= term { ( "+" | "-" ) term }
+term        ::= factor { "*" factor }
+factor      ::= number | "true" | "false" | identifier
+
 practice3 ebnf:
 
 program ::= { statement } exit_stmt
@@ -19,15 +49,4 @@ exit_stmt ::= "exit" operand
 value ::= operand [ ( "+" | "-" | "*" ) operand ]
 operand ::= number | identifier
 
-practice4 ebnf:
 
-program     ::= { statement } exit_stmt
-statement   ::= declaration | assignment
-declaration ::= type [ "mut" ] identifier "{" expression "}"
-assignment  ::= identifier ":=" expression
-exit_stmt   ::= "exit" factor
-type        ::= "i32" | "i64" | "bool"
-expression  ::= arith [ ( "==" | "!=" ) arith ]
-arith       ::= term { ( "+" | "-" ) term }
-term        ::= factor { "*" factor }
-factor      ::= number | "true" | "false" | identifier
