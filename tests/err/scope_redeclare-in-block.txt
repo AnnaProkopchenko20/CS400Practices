@@ -1,0 +1,7 @@
+i32 a{1}
+if true
+{
+    i32 a{2}
+    i32 a{3}
+}
+exit a

@@ -1,3 +1,17 @@
+https://claude.ai/share/fcf0b99f-99d9-427f-9e01-0eec7cc45075
+
+gemini exchange:
+i am currently working on practice 5 (practices prior are given as context) 
+the four new node structs in ast.h (IfNode, BlockNode, NotNode, WhileNode) with dump() matching the PDF's format, the new Visitor methods, and empty visit_* stubs in semantic.h and codegen.h so everything compiles. 
+
+answer:
+Here are the complete updated files and stubs for Practice 5.
+
+### 1. `ast.h`
+
+Includes the forward declarations, the four new node structs (`IfNode`, `BlockNode`, `NotNode`, `WhileNode`) with their corresponding `dump()` methods formatted according to the specification, and the updated `Visitor` interface.
+
+```cpp
 #pragma once
 #include <iostream>
 #include <memory>
@@ -278,3 +292,55 @@ struct ProgramNode : Node {
         return v.visit_program(*this);
     }
 };
+
+```
+
+---
+
+### 2. `semantic.h` (Stub additions)
+
+Add these empty visitor methods inside `SemanticChecker`:
+
+```cpp
+    llvm::Value* visit_if(IfNode& n) override {
+        return nullptr;
+    }
+
+    llvm::Value* visit_block(BlockNode& n) override {
+        return nullptr;
+    }
+
+    llvm::Value* visit_not(NotNode& n) override {
+        return nullptr;
+    }
+
+    llvm::Value* visit_while(WhileNode& n) override {
+        return nullptr;
+    }
+
+```
+
+---
+
+### 3. `codegen.h` (Stub additions)
+
+Add these empty visitor methods inside `CodeGen`:
+
+```cpp
+    llvm::Value* visit_if(IfNode& n) override {
+        return nullptr;
+    }
+
+    llvm::Value* visit_block(BlockNode& n) override {
+        return nullptr;
+    }
+
+    llvm::Value* visit_not(NotNode& n) override {
+        return nullptr;
+    }
+
+    llvm::Value* visit_while(WhileNode& n) override {
+        return nullptr;
+    }
+
+```

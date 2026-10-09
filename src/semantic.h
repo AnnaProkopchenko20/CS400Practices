@@ -5,16 +5,30 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <vector>
 #include "ast.h"
 
 class SemanticChecker : public Visitor {
-    std::map<std::string, DeclNode*> symbols;
+    // stack of frames: back() is the innermost scope
+    std::vector<std::map<std::string, DeclNode*>> scopes;
 
     [[noreturn]] void fail(int line, int col, const std::string& msg) {
         throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col) + ": " + msg);
     }
 
     static bool is_int(const std::string& t) { return t == "i32" || t == "i64"; }
+
+    // walk the frames from the top down, first hit wins
+    DeclNode* lookup(const Node& at, const std::string& name)
+    {
+        for (auto frame = scopes.rbegin(); frame != scopes.rend(); ++frame)
+        {
+            auto it = frame->find(name);
+            if (it != frame->end())
+                return it->second;
+        }
+        fail(at.line, at.col, "variable '" + name + "' is used before its declaration");
+    }
 
     void check_assignable(const ExprNode& expr, const std::string& want, const Node& at, const std::string& what)
     {
@@ -32,6 +46,8 @@ class SemanticChecker : public Visitor {
     }
 
 public:
+    SemanticChecker() { scopes.emplace_back(); }   // the top-level frame
+
     llvm::Value* visit_program(ProgramNode& n) override
     {
         for (auto& s : n.stmts)
@@ -45,24 +61,20 @@ public:
     }
 
     llvm::Value* visit_decl(DeclNode& n) override {
-        if (symbols.count(n.name))
-            fail(n.line, n.col, "variable '" + n.name + "' is already defined");
+        // only the top frame counts as a duplicate; outer names may be shadowed
+        if (scopes.back().count(n.name))
+            fail(n.line, n.col, "variable '" + n.name + "' is already declared in this block");
 
         n.expr->accept(*this);
         check_assignable(*n.expr, n.type_name, n, "initialise '" + n.name + "'");
 
-        symbols[n.name] = &n;
+        scopes.back()[n.name] = &n;
 
         return nullptr;
     }
 
     llvm::Value* visit_asmt(AsmtNode& n) override {
-        auto it = symbols.find(n.name);
-
-        if (it == symbols.end())
-            fail(n.line, n.col, "assignment to undeclared variable '" + n.name + "'");
-
-        DeclNode* decl = it->second;
+        DeclNode* decl = lookup(n, n.name);
 
         if (!decl->is_mut)
             fail(n.line, n.col, "cannot assign to a const variable '" + n.name + "'");
@@ -103,12 +115,7 @@ public:
     }
 
     llvm::Value* visit_var(VarNameNode& n) override {
-        auto it = symbols.find(n.name);
-
-        if (it == symbols.end())
-            fail(n.line, n.col, "unknown variable '" + n.name + "'");
-
-        n.decl = it->second;
+        n.decl = lookup(n, n.name);
         n.type = n.decl->type_name;
 
         return nullptr;
@@ -140,6 +147,56 @@ public:
 
             n.type = "bool";
         }
+
+        return nullptr;
+    }
+
+    llvm::Value* visit_if(IfNode& n) override {
+        n.cond->accept(*this);
+
+        if (n.cond->type != "bool")
+            fail(n.line, n.col, "the condition of 'if' must be bool, got " + n.cond->type);
+
+        n.then_block->accept(*this);
+        if (n.else_block)
+            n.else_block->accept(*this);
+
+        return nullptr;
+    }
+
+    llvm::Value* visit_block(BlockNode& n) override {
+        scopes.emplace_back();
+
+        for (auto& s : n.stmts)
+        {
+            s->accept(*this);
+        }
+        if (n.exit_stmt)
+            n.exit_stmt->accept(*this);
+
+        scopes.pop_back();
+
+        return nullptr;
+    }
+
+    llvm::Value* visit_not(NotNode& n) override {
+        n.expr->accept(*this);
+
+        if (n.expr->type != "bool")
+            fail(n.line, n.col, "cannot apply '!' to " + n.expr->type);
+
+        n.type = "bool";
+
+        return nullptr;
+    }
+
+    llvm::Value* visit_while(WhileNode& n) override {
+        n.cond->accept(*this);
+
+        if (n.cond->type != "bool")
+            fail(n.line, n.col, "the condition of 'while' must be bool, got " + n.cond->type);
+
+        n.body->accept(*this);
 
         return nullptr;
     }

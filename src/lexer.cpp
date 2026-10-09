@@ -16,8 +16,6 @@ std::vector<std::vector<Token>> lex(const std::string& data)
     int start = 0, line = 1, col = 1;
     size_t i = 0;
 
-    int open_brace_col = -1;
-
     std::map<std::string, std::string> keywords =
     {
         {"i32", "keyword"},
@@ -26,7 +24,10 @@ std::vector<std::vector<Token>> lex(const std::string& data)
         {"i64", "keyword"},
         {"bool", "keyword"},
         {"true", "keyword"},
-        {"false", "keyword"}
+        {"false", "keyword"},
+        {"if", "keyword"},
+        {"else", "keyword"},
+        {"while", "keyword"}
     };
 
     while (i <= data.length())
@@ -41,13 +42,8 @@ std::vector<std::vector<Token>> lex(const std::string& data)
 
         if (state == State::START)
         {
-            if (is_eof) {
-                if (open_brace_col != -1)
-                {
-                    throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(open_brace_col) + ": '{' is not closed before the end of the line");
-                }
-                break;
-            }
+            if (is_eof) { break; }
+
             else if (b == ' ' || b == '\t' || b == '\r')
             {
                 // pass
@@ -59,11 +55,6 @@ std::vector<std::vector<Token>> lex(const std::string& data)
             }
             else if (b == '\n')
             {
-                if (open_brace_col != -1)
-                {
-                    throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(open_brace_col) + ": '{' is not closed before the end of the line");
-                }
-
                 lines.push_back(tokens);
                 tokens.clear();
                 line += 1;
@@ -77,12 +68,10 @@ std::vector<std::vector<Token>> lex(const std::string& data)
             else if (b == '{')
             {
                 tokens.push_back({"block", "{", line, col});
-                open_brace_col = col;
             }
             else if (b == '}')
             {
                 tokens.push_back({"block", "}", line, col});
-                open_brace_col = -1;
             }
             else if (b == '+' || b == '-' || b == '*')
             {
@@ -172,7 +161,9 @@ std::vector<std::vector<Token>> lex(const std::string& data)
             }
             else
             {
-                throw std::runtime_error("line " + std::to_string(line) + ":" + std::to_string(col - 1) + ": expected '!=' (a single '!' is not an operator)");
+                tokens.push_back({"operator", "!", line, col - 1});
+                state = State::START;
+                continue;
             }
         }
 
