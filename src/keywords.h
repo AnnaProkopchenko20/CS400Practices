@@ -2,9 +2,7 @@
 #include <map>
 #include <string>
 
-// The single source of truth for all Practice 5 keyword spellings.
-// Every module that needs to compare against or print keywords must use these
-// constants instead of scattered string literals.
+// The single source of truth for all Practice 6 keyword spellings.
 namespace kw
 {
     // Types
@@ -13,11 +11,10 @@ namespace kw
     inline constexpr const char* BOOL   = "bool";
 
     // Functions
-    inline constexpr const char* FN    = "fn";
+    inline constexpr const char* FN     = "fn";
 
     // Declaring Types
     inline constexpr const char* STRUCT = "struct";
-
 
     // Mutability modifier
     inline constexpr const char* MUT    = "mut";
@@ -42,11 +39,10 @@ namespace kw
             {I32,    "keyword"}, {I64,    "keyword"}, {BOOL,   "keyword"},
             {MUT,    "keyword"}, {TRUE_,  "keyword"}, {FALSE_, "keyword"},
             {IF,     "keyword"}, {ELSE,   "keyword"}, {WHILE,  "keyword"},
-            {EXIT,   "keyword"}
+            {EXIT,   "keyword"}, {FN,     "keyword"}, {STRUCT, "keyword"}
         };
     }
 
     // Returns the canonical keyword spelling for a type name.
-    // In Practice 5 all keywords are plain ASCII, so this is the identity function.
     inline const std::string& type_keyword(const std::string& t) { return t; }
 }

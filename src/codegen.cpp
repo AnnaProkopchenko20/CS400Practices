@@ -181,3 +181,14 @@ llvm::Value* CodeGen::visit_not(NotNode& n)
 {
     return builder.CreateNot(n.expr->accept(*this), "nottmp");
 }
+
+llvm::Value* CodeGen::visit_struct_decl(StructDeclNode& n) { return nullptr; }
+llvm::Value* CodeGen::visit_fn_decl(FunctionDeclNode& n) { return nullptr; }
+llvm::Value* CodeGen::visit_fn_call(FunctionCallNode& n) { return nullptr; }
+llvm::Value* CodeGen::visit_field_access(StructFieldAccessNode& n) { return nullptr; }
+llvm::Value* CodeGen::visit_init(InitNode& n)
+{
+    if (!n.items.empty())
+        return n.items[0]->accept(*this);
+    return nullptr;
+}

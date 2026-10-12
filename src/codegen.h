@@ -3,50 +3,52 @@
 #include <memory>
 #include <string>
 
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 
 #include "ast.h"
+#include "visitor.h"
 
-// LLVM IR code generation visitor.
 struct CodeGen : Visitor
 {
-    llvm::LLVMContext             context;
+    llvm::LLVMContext        context;
+    llvm::IRBuilder<>        builder;
     std::unique_ptr<llvm::Module> module;
-    llvm::IRBuilder<>             builder;
-    llvm::Function*               main_func = nullptr;
-    std::map<DeclNode*, llvm::AllocaInst*> allocas;
 
-    llvm::Type* i1_type;
-    llvm::Type* i32_type;
-    llvm::Type* i64_type;
+    llvm::Type* i32_type = nullptr;
+    llvm::Type* i64_type = nullptr;
+    llvm::Type* i1_type  = nullptr;
 
+    llvm::Function*     main_func   = nullptr;
     llvm::FunctionCallee printf_func;
-    llvm::Constant*      fmt_int;
-    llvm::Constant*      fmt_bool;
-    llvm::Constant*      true_str;
-    llvm::Constant*      false_str;
+    llvm::Value*        fmt_int     = nullptr;
+    llvm::Value*        fmt_bool    = nullptr;
+    llvm::Value*        true_str    = nullptr;
+    llvm::Value*        false_str   = nullptr;
+
+    std::map<DeclNode*, llvm::AllocaInst*> allocas;
 
     CodeGen();
 
     llvm::Value* visit_program(ProgramNode& n) override;
-    llvm::Value* visit_block(BlockNode& n)     override;
     llvm::Value* visit_decl(DeclNode& n)       override;
     llvm::Value* visit_asmt(AsmtNode& n)       override;
     llvm::Value* visit_exit(ExitNode& n)       override;
-    llvm::Value* visit_if(IfNode& n)           override;
-    llvm::Value* visit_while(WhileNode& n)     override;
     llvm::Value* visit_number(NumberNode& n)   override;
     llvm::Value* visit_bool(BoolNode& n)       override;
     llvm::Value* visit_var(VarNameNode& n)     override;
+    llvm::Value* visit_if(IfNode& n)           override;
+    llvm::Value* visit_while(WhileNode& n)     override;
+    llvm::Value* visit_block(BlockNode& n)     override;
     llvm::Value* visit_not(NotNode& n)         override;
     llvm::Value* visit_binop(BinaryOpNode& n)  override;
 
-    // new visitors for all new nodes
-    // take suggestions from the practice on implementation details
+    llvm::Value* visit_struct_decl(StructDeclNode& n)         override;
+    llvm::Value* visit_fn_decl(FunctionDeclNode& n)           override;
+    llvm::Value* visit_fn_call(FunctionCallNode& n)           override;
+    llvm::Value* visit_field_access(StructFieldAccessNode& n) override;
+    llvm::Value* visit_init(InitNode& n)                      override;
 
 private:
     llvm::Type*       llvm_type(const std::string& name);

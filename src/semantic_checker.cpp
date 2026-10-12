@@ -42,8 +42,14 @@ void SemanticChecker::check_assignable(const ExprNode& expr,
 {
     const std::string& have = expr.type;
     if (want == "i32" && have == "i64")
+    {
         if (auto* num = dynamic_cast<const NumberNode*>(&expr))
             fail(num->line, num->col, "constant " + num->text + " does not fit in i32");
+        if (auto* init = dynamic_cast<const InitNode*>(&expr))
+            if (init->items.size() == 1)
+                if (auto* num2 = dynamic_cast<const NumberNode*>(init->items[0].get()))
+                    fail(num2->line, num2->col, "constant " + num2->text + " does not fit in i32");
+    }
     if (have == want || (have == "i32" && want == "i64")) return;
     fail(at, "cannot " + what + " of type " + want + " with a value of type " + have);
 }
@@ -163,5 +169,18 @@ llvm::Value* SemanticChecker::visit_binop(BinaryOpNode& n)
         if (!ok) fail(n, "cannot compare " + lt + " with " + rt);
         n.type = "bool";
     }
+    return nullptr;
+}
+
+llvm::Value* SemanticChecker::visit_struct_decl(StructDeclNode& n) { return nullptr; }
+llvm::Value* SemanticChecker::visit_fn_decl(FunctionDeclNode& n) { return nullptr; }
+llvm::Value* SemanticChecker::visit_fn_call(FunctionCallNode& n) { return nullptr; }
+llvm::Value* SemanticChecker::visit_field_access(StructFieldAccessNode& n) { return nullptr; }
+llvm::Value* SemanticChecker::visit_init(InitNode& n)
+{
+    for (auto& item : n.items)
+        item->accept(*this);
+    if (!n.items.empty())
+        n.type = n.items[0]->type;
     return nullptr;
 }
