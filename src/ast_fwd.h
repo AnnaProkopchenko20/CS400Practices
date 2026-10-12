@@ -1,0 +1,13 @@
+#pragma once
+#include <iostream>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+using std::string; using std::vector; using std::unique_ptr; using std::make_unique;
+
+// Forward declarations for all AST node types.
+struct ProgramNode; struct DeclNode;  struct AsmtNode;    struct ExitNode;
+struct NumberNode;  struct BoolNode;  struct VarNameNode; struct BinaryOpNode;
+struct IfNode;      struct BlockNode; struct NotNode;      struct WhileNode;
