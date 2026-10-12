@@ -16,7 +16,7 @@ class Parser
 public:
     explicit Parser(const std::vector<std::vector<Token>>& lines);
 
-    std::unique_ptr<ProgramNode> parse_program(); // needst to change
+    std::unique_ptr<ProgramNode> parse_program();
 
 private:
     const std::vector<std::vector<Token>>& lines;
@@ -31,6 +31,8 @@ private:
     Token eat();
     bool at(const std::string& kind, const std::string& text = "") const;
     bool at_type() const;
+    bool at_decl() const;
+    Token expect_type();
 
     static std::string where(int line, int col);
     std::runtime_error error_at(const Token& t, const std::string& msg) const;
@@ -39,7 +41,7 @@ private:
     void end_of_line();
 
     std::unique_ptr<StmtNode>  parse_statement();
-    std::unique_ptr<StmtNode>  parse_decl(); // needs to change
+    std::unique_ptr<StmtNode>  parse_decl();
     std::unique_ptr<StmtNode>  parse_assign();
     std::unique_ptr<ExitNode>  parse_exit();
     std::unique_ptr<IfNode>    parse_if();
@@ -50,11 +52,9 @@ private:
     std::unique_ptr<ExprNode>  parse_term();
     std::unique_ptr<ExprNode>  parse_factor();
 
-    std::unique_ptr<StructDeclNode>  parse_struct_decl();
-    std::unique_ptr<FunctionCallNode>  parse_fn_call();
-    std::unique_ptr<FunctionDeclNode>  parse_fn_decl();
-    std::unique_ptr<InitNode>  parse_init();
-    std::unique_ptr<StructFieldAccessNode>  parse_struct_field_access();
-    std::unique_ptr<FieldDeclNode>  parse_field_decl();
-    std::unique_ptr<FuncParamNode>  parse_param();
+    std::unique_ptr<StructDeclNode>   parse_struct_decl();
+    std::unique_ptr<FieldDeclNode>    parse_field_decl();
+    std::unique_ptr<FunctionDeclNode> parse_fn_decl();
+    std::unique_ptr<FuncParamNode>    parse_param();
+    std::unique_ptr<InitNode>         parse_init();
 };

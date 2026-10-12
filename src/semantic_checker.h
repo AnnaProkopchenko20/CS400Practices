@@ -6,9 +6,20 @@
 #include "ast.h"
 #include "visitor.h"
 
-// Semantic analysis pass: resolves variable references, checks types and
-// mutability.  Fills in .type on every ExprNode and the .decl back-links on
-// VarNameNode and AsmtNode.
+struct FieldInfo {
+    std::string type;
+    std::string name;
+    bool is_mut;
+    int index;
+};
+
+struct StructInfo {
+    std::string name;
+    std::vector<FieldInfo> fields;
+    std::map<std::string, int> field_index;
+};
+
+// Semantic analysis pass.
 class SemanticChecker : public Visitor
 {
 public:
@@ -34,9 +45,13 @@ public:
     llvm::Value* visit_field_access(StructFieldAccessNode& n) override;
     llvm::Value* visit_init(InitNode& n)                      override;
 
+    std::map<std::string, StructInfo> structs;
+
 private:
     using Scope = std::map<std::string, DeclNode*>;
     std::vector<Scope> scopes;
+    std::map<std::string, FunctionDeclNode*> functions;
+    FunctionDeclNode* current_fn = nullptr;
 
     [[noreturn]] void fail(int line, int col, const std::string& msg);
     [[noreturn]] void fail(const Node& at, const std::string& msg);
@@ -45,4 +60,6 @@ private:
     void check_assignable(const ExprNode& expr, const std::string& want,
                           const Node& at, const std::string& what);
     void check_condition(ExprNode& cond, const Node& at, const char* keyword);
+    void check_init_item(ExprNode& item, const std::string& expected_type);
+    bool all_fields_mut(const std::string& type_name);
 };

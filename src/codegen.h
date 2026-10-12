@@ -8,26 +8,31 @@
 #include <llvm/IR/Module.h>
 
 #include "ast.h"
+#include "semantic_checker.h"
 #include "visitor.h"
 
 struct CodeGen : Visitor
 {
-    llvm::LLVMContext        context;
-    llvm::IRBuilder<>        builder;
+    llvm::LLVMContext             context;
+    llvm::IRBuilder<>             builder;
     std::unique_ptr<llvm::Module> module;
 
     llvm::Type* i32_type = nullptr;
     llvm::Type* i64_type = nullptr;
     llvm::Type* i1_type  = nullptr;
 
-    llvm::Function*     main_func   = nullptr;
+    llvm::Function*      main_func   = nullptr;
     llvm::FunctionCallee printf_func;
-    llvm::Value*        fmt_int     = nullptr;
-    llvm::Value*        fmt_bool    = nullptr;
-    llvm::Value*        true_str    = nullptr;
-    llvm::Value*        false_str   = nullptr;
+    llvm::Value*         fmt_int     = nullptr;
+    llvm::Value*         fmt_bool    = nullptr;
+    llvm::Value*         true_str    = nullptr;
+    llvm::Value*         false_str   = nullptr;
 
-    std::map<DeclNode*, llvm::AllocaInst*> allocas;
+    std::map<DeclNode*, llvm::AllocaInst*>    allocas;
+    std::map<std::string, llvm::StructType*>  struct_types;
+    std::map<std::string, llvm::Function*>    ir_functions;
+    std::map<std::string, StructInfo>         structs;
+    FunctionDeclNode*                         current_fn = nullptr;
 
     CodeGen();
 

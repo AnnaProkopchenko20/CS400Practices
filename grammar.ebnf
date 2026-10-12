@@ -5,7 +5,7 @@ program     ::= { struct } { fn } { statement } exit_stmt
 struct      ::= "struct" ident NL "{" NL field_decl { field_decl } "}" NL
 field_decl  ::= type [ "mut" ] ident NL
 
-fn          ::= "fn" ident ":=" "(" param { "," param } ")" "->" type NL block
+fn          ::= "fn" ident ":=" "(" [ param { "," param } ] ")" "->" type NL block
 param       ::= type ident
 
 block       ::= "{" NL { statement } [ exit_stmt NL ] "}" NL
