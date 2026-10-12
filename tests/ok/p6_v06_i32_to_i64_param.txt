@@ -1,0 +1,8 @@
+fn multiply := (i64 a, i64 b) -> i64
+{
+    i64 res{a * b}
+    exit res
+}
+i32 x{6}
+i32 y{7}
+exit multiply(x, y)
