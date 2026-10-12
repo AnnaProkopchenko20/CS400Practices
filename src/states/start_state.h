@@ -1,9 +1,6 @@
 #pragma once
 #include "../lexer_context.h"
 
-// Between tokens: skips whitespace, emits single-byte tokens, transitions to
-// a new state for multi-byte tokens.
-// Practice 5 is ASCII-only; any byte >= 0x80 is immediately rejected.
 class StartState : public LexerState
 {
 public:
@@ -40,7 +37,6 @@ public:
             return true;
         }
 
-
         if (b == ',') { ctx.emit("comma", ",", ctx.line, ctx.col); return true; }
         if (b == '.') { ctx.emit("dot",   ".", ctx.line, ctx.col); return true; }
 
@@ -50,12 +46,10 @@ public:
             return true;
         }
 
-
         if (b == ':') { ctx.markStart(); ctx.changeState(StateId::Assign);   return true; }
         if (b == '-') { ctx.markStart(); ctx.changeState(StateId::MinusState); return true; }
         if (b == '=') { ctx.markStart(); ctx.changeState(StateId::Equals);   return true; }
         if (b == '!') { ctx.markStart(); ctx.changeState(StateId::Negation); return true; }
-
 
         if (b > 127)
             ctx.fail("unexpected byte", ctx.line, ctx.col);

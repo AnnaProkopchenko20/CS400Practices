@@ -1,8 +1,6 @@
 #pragma once
 #include "../lexer_context.h"
 
-// ASCII identifier or keyword.
-// Any byte >= 0x80 is rejected because Practice 5 identifiers are ASCII-only.
 class IdentState : public LexerState
 {
 public:

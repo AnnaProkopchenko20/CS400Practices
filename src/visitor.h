@@ -22,7 +22,6 @@ struct Visitor {
     virtual llvm::Value* visit_not(NotNode&)          = 0;
     virtual llvm::Value* visit_binop(BinaryOpNode&)   = 0;
 
-    // Practice 6 visitors
     virtual llvm::Value* visit_struct_decl(StructDeclNode&)         = 0;
     virtual llvm::Value* visit_fn_decl(FunctionDeclNode&)           = 0;
     virtual llvm::Value* visit_fn_call(FunctionCallNode&)           = 0;

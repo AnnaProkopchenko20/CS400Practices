@@ -33,8 +33,9 @@ int main(int argc, char* argv[])
 
     std::ifstream input_file(args[0]);
     if (!input_file.is_open()) { std::cerr << "Failed to open input file.\n"; return 1; }
-    std::string source((std::istreambuf_iterator<char>(input_file)),
-                       std::istreambuf_iterator<char>());
+    std::string source(
+        (std::istreambuf_iterator<char>(input_file)),
+        std::istreambuf_iterator<char>());
     input_file.close();
 
     try

@@ -48,7 +48,6 @@ struct CodeGen : Visitor
     llvm::Value* visit_block(BlockNode& n)     override;
     llvm::Value* visit_not(NotNode& n)         override;
     llvm::Value* visit_binop(BinaryOpNode& n)  override;
-
     llvm::Value* visit_struct_decl(StructDeclNode& n)         override;
     llvm::Value* visit_fn_decl(FunctionDeclNode& n)           override;
     llvm::Value* visit_fn_call(FunctionCallNode& n)           override;

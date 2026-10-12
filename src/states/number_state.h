@@ -1,7 +1,6 @@
 #pragma once
 #include "../lexer_context.h"
 
-// Decimal integer literal.
 class NumberState : public LexerState
 {
 public:

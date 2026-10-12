@@ -12,8 +12,6 @@ namespace
 
 SemanticChecker::SemanticChecker() { scopes.emplace_back(); }
 
-// ---- helpers ----
-
 void SemanticChecker::fail(int line, int col, const std::string& msg)
 {
     throw std::runtime_error(
@@ -36,9 +34,9 @@ DeclNode* SemanticChecker::lookup(const Node& at, const std::string& name)
 }
 
 void SemanticChecker::check_assignable(const ExprNode& expr,
-                                       const std::string& want,
-                                       const Node& at,
-                                       const std::string& what)
+    const std::string& want,
+    const Node& at,
+    const std::string& what)
 {
     const std::string& have = expr.type;
     if (want == "i32" && have == "i64")
@@ -64,7 +62,7 @@ void SemanticChecker::check_condition(ExprNode& cond, const Node& at, const char
 bool SemanticChecker::all_fields_mut(const std::string& type_name)
 {
     auto it = structs.find(type_name);
-    if (it == structs.end()) return true; // primitive type
+    if (it == structs.end()) return true;
     for (const auto& f : it->second.fields)
     {
         if (!f.is_mut) return false;
@@ -92,9 +90,11 @@ void SemanticChecker::check_init_item(ExprNode& item, const std::string& expecte
         {
             const auto& sinfo = it->second;
             if (init->items.size() != sinfo.fields.size())
+            {
                 fail(*init, "struct '" + expected_type + "' has " +
-                     std::to_string(sinfo.fields.size()) + " field(s), got " +
-                     std::to_string(init->items.size()));
+                    std::to_string(sinfo.fields.size()) + " field(s), got " +
+                    std::to_string(init->items.size()));
+            }
             for (size_t j = 0; j < sinfo.fields.size(); ++j)
                 check_init_item(*init->items[j], sinfo.fields[j].type);
             init->type = expected_type;
@@ -103,13 +103,13 @@ void SemanticChecker::check_init_item(ExprNode& item, const std::string& expecte
         {
             item.accept(*this);
             if (item.type != expected_type)
+            {
                 fail(item, "cannot initialise field of type " + expected_type +
-                           " with value of type " + item.type);
+                    " with value of type " + item.type);
+            }
         }
     }
 }
-
-// ---- visitors ----
 
 llvm::Value* SemanticChecker::visit_struct_decl(StructDeclNode& n)
 {
@@ -149,7 +149,7 @@ llvm::Value* SemanticChecker::visit_fn_decl(FunctionDeclNode& n)
 {
     current_fn = &n;
     scopes.clear();
-    scopes.emplace_back(); // isolated local scope
+    scopes.emplace_back();
 
     for (auto& p : n.params)
     {
@@ -170,11 +170,9 @@ llvm::Value* SemanticChecker::visit_fn_decl(FunctionDeclNode& n)
 
 llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
 {
-    // 1. Process all structs in declaration order
     for (auto& s : n.structs)
         s->accept(*this);
 
-    // 2. Pass 1: Collect all function signatures
     for (auto& fn : n.functions)
     {
         if (functions.count(fn->name) || structs.count(fn->name) ||
@@ -188,13 +186,11 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
         functions[fn->name] = fn.get();
     }
 
-    // 3. Pass 2: Check all function bodies
     for (auto& fn : n.functions)
         fn->accept(*this);
 
-    // 4. Check top-level statements and exit
     scopes.clear();
-    scopes.emplace_back(); // top-level scope
+    scopes.emplace_back();
     for (auto& s : n.stmts) s->accept(*this);
     n.exit_stmt->accept(*this);
     return nullptr;
@@ -234,7 +230,6 @@ llvm::Value* SemanticChecker::visit_decl(DeclNode& n)
     else
     {
         const auto& sinfo = structs[n.type_name];
-        // Check for 1 item copy / call of same struct type
         if (n.expr->items.size() == 1)
         {
             n.expr->items[0]->accept(*this);
@@ -247,9 +242,11 @@ llvm::Value* SemanticChecker::visit_decl(DeclNode& n)
         }
 
         if (n.expr->items.size() != sinfo.fields.size())
+        {
             fail(n, "struct '" + n.type_name + "' has " +
-                 std::to_string(sinfo.fields.size()) + " field(s), got " +
-                 std::to_string(n.expr->items.size()));
+                std::to_string(sinfo.fields.size()) + " field(s), got " +
+                std::to_string(n.expr->items.size()));
+        }
 
         for (size_t i = 0; i < sinfo.fields.size(); ++i)
             check_init_item(*n.expr->items[i], sinfo.fields[i].type);
@@ -412,8 +409,10 @@ llvm::Value* SemanticChecker::visit_fn_call(FunctionCallNode& n)
         const auto& want = f->params[i]->type_name;
         const auto& have = n.args[i]->type;
         if (have != want && !(have == "i32" && want == "i64"))
+        {
             fail(*n.args[i], "cannot pass argument " + std::to_string(i + 1) + " of '" +
-                 n.name + "' of type " + want + " with a value of type " + have);
+                n.name + "' of type " + want + " with a value of type " + have);
+        }
     }
 
     n.type = f->return_type;

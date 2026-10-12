@@ -12,8 +12,11 @@ struct FuncParamNode : Node {
     std::unique_ptr<DeclNode> decl;
 
     FuncParamNode(int l, int c, std::string t, std::string n)
-        : Node(l, c), type_name(std::move(t)), name(std::move(n)), is_mut(false),
-          decl(std::make_unique<DeclNode>(l, c, type_name, name, false, std::unique_ptr<InitNode>(nullptr))) {}
+        : Node(l, c)
+        , type_name(std::move(t))
+        , name(std::move(n))
+        , is_mut(false)
+        , decl(std::make_unique<DeclNode>(l, c, type_name, name, false, std::unique_ptr<InitNode>(nullptr))) {}
 
     void dump(int d) const override {
         indent(d);

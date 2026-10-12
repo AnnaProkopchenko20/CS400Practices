@@ -10,7 +10,7 @@ struct DeclNode;
 struct StructFieldAccessNode : ValueNode {
     std::string base_name;
     std::vector<std::string> field_names;
-    std::vector<int> path;       // GEP indices filled by SemanticChecker
+    std::vector<int> path;
     DeclNode* base_decl = nullptr;
 
     StructFieldAccessNode(int l, int c, std::string base, std::vector<std::string> fields)

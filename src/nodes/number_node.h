@@ -2,10 +2,11 @@
 #include "value_node.h"
 
 struct NumberNode : ValueNode {
-    string    text;        // digit string exactly as written in the source
-    long long value = 0;  // filled in by SemanticChecker
+    string    text;
+    long long value = 0;
 
-    NumberNode(int l, int c, string t) : ValueNode(l, c), text(std::move(t)) {}
+    NumberNode(int l, int c, string text)
+        : ValueNode(l, c), text(std::move(text)) {}
 
     void dump(int d) const override
     {

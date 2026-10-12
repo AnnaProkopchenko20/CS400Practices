@@ -1,8 +1,6 @@
 #pragma once
 #include "../lexer_context.h"
 
-// After '=' -- only "==" is valid in Practice 5.
-// A single '=' is not an operator; "=>" does not exist in this grammar.
 class EqualsState : public LexerState
 {
 public:

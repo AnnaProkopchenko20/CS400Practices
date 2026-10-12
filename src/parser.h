@@ -51,7 +51,6 @@ private:
     std::unique_ptr<ExprNode>  parse_arith();
     std::unique_ptr<ExprNode>  parse_term();
     std::unique_ptr<ExprNode>  parse_factor();
-
     std::unique_ptr<StructDeclNode>   parse_struct_decl();
     std::unique_ptr<FieldDeclNode>    parse_field_decl();
     std::unique_ptr<FunctionDeclNode> parse_fn_decl();

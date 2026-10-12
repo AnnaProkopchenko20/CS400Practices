@@ -10,9 +10,6 @@
 #include "states/lexer_state.h"
 #include "keywords.h"
 
-// Byte-classification helpers.
-// Practice 5 is an ASCII-only language: identifiers may contain ASCII letters,
-// digits and underscores.  Any byte >= 0x80 is illegal.
 namespace lexchar
 {
     inline bool isAsciiLetter(unsigned char b)
@@ -22,9 +19,6 @@ namespace lexchar
     inline bool isDigit(unsigned char b) { return b >= '0' && b <= '9'; }
 }
 
-// Context of the State pattern: it owns the current state, the input position
-// and the accumulated tokens.  States communicate with the lexer only through
-// this class.
 class LexerContext
 {
 public:
@@ -32,16 +26,15 @@ public:
     size_t i        = 0;
     int    line     = 1;
     int    col      = 1;
-    size_t start    = 0;       // byte offset where the current lexeme began
-    int    startCol = 1;       // column where the current lexeme began
+    size_t start    = 0;
+    int    startCol = 1;
     bool   finished = false;
     std::unique_ptr<LexerState> state;
 
     explicit LexerContext(const std::string& src)
-        : data(src), state(makeState(StateId::Start)),
-          keywords(kw::keyword_table()) {}
-
-    // ---- state switching (applied after handle() returns, never mid-call) ----
+        : data(src)
+        , state(makeState(StateId::Start))
+        , keywords(kw::keyword_table()) {}
 
     void changeState(StateId id) { pending = id; hasPending = true; }
 
@@ -53,8 +46,6 @@ public:
             state = makeState(pending);
         }
     }
-
-    // ---- lexeme helpers ----
 
     void markStart() { start = i; startCol = col; }
 
@@ -73,19 +64,15 @@ public:
 
     void emitLexeme(const std::string& kind) { emit(kind, lexeme(), line, startCol); }
 
-    // ---- input movement ----
-
     void endLine()
     {
         lines.push_back(tokens);
         tokens.clear();
         line += 1;
-        col = 0;    // advance() will make it 1
+        col = 0;
     }
 
     void advance() { i += 1; col += 1; }
-
-    // ---- errors ----
 
     [[noreturn]] void fail(const std::string& msg, int l, int c) const
     {
@@ -93,7 +80,6 @@ public:
             "line " + std::to_string(l) + ":" + std::to_string(c) + ": " + msg);
     }
 
-    // Render a printable ASCII byte as 'x'; others as hex.
     static std::string describeByte(unsigned char b)
     {
         if (b >= 0x20 && b < 0x7F)

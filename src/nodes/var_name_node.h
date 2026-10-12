@@ -1,11 +1,14 @@
 #pragma once
 #include "value_node.h"
 
+struct DeclNode;
+
 struct VarNameNode : ValueNode {
     string    name;
-    DeclNode* decl = nullptr;   // back-link set by SemanticChecker (non-owning)
+    DeclNode* decl = nullptr;
 
-    VarNameNode(int l, int c, string n) : ValueNode(l, c), name(std::move(n)) {}
+    VarNameNode(int l, int c, string name)
+        : ValueNode(l, c), name(std::move(name)) {}
 
     void dump(int d) const override
     {

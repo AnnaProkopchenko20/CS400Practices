@@ -1,7 +1,5 @@
 #include "parser.h"
 
-// ---- cursor helpers ----
-
 const std::vector<Token>* Parser::peek_line() const
 {
     size_t idx = next_idx;
@@ -42,9 +40,9 @@ bool Parser::at(const std::string& kind, const std::string& text) const
 bool Parser::at_type() const
 {
     return at("keyword", kw::I32) ||
-           at("keyword", kw::I64) ||
-           at("keyword", kw::BOOL) ||
-           at("identifier");
+        at("keyword", kw::I64) ||
+        at("keyword", kw::BOOL) ||
+        at("identifier");
 }
 
 bool Parser::at_decl() const
@@ -68,8 +66,6 @@ Token Parser::expect_type()
         throw error("expected a type");
     return eat();
 }
-
-// ---- error helpers ----
 
 std::string Parser::where(int line, int col)
 {
@@ -101,8 +97,6 @@ void Parser::end_of_line()
     if (const Token* t = peek())
         throw error_at(*t, "unexpected '" + t->text + "' after the statement");
 }
-
-// ---- grammar ----
 
 Parser::Parser(const std::vector<std::vector<Token>>& l) : lines(l) {}
 
@@ -161,9 +155,10 @@ std::unique_ptr<ProgramNode> Parser::parse_program()
     if (!exit_node)
         throw std::runtime_error(where(last_line, 1) + "no exit");
 
-    return make_unique<ProgramNode>(first_line, first_col,
-                                   std::move(structs), std::move(functions),
-                                   std::move(stmts), std::move(exit_node));
+    return make_unique<ProgramNode>(
+        first_line, first_col,
+        std::move(structs), std::move(functions),
+        std::move(stmts), std::move(exit_node));
 }
 
 // struct ::= "struct" ident NL "{" NL field_decl { field_decl } "}" NL
@@ -198,8 +193,9 @@ std::unique_ptr<StructDeclNode> Parser::parse_struct_decl()
             eat(); end_of_line();
             if (fields.empty())
                 throw error_at(open, "a struct must have at least one field");
-            return make_unique<StructDeclNode>(kw_tok.line, kw_tok.col,
-                                               name.text, std::move(fields));
+            return make_unique<StructDeclNode>(
+                kw_tok.line, kw_tok.col,
+                name.text, std::move(fields));
         }
 
         fields.push_back(parse_field_decl());
@@ -214,8 +210,9 @@ std::unique_ptr<FieldDeclNode> Parser::parse_field_decl()
     if (is_mut) eat();
     Token name_tok = expect("identifier", "", "a field name");
     end_of_line();
-    return make_unique<FieldDeclNode>(type_tok.line, type_tok.col,
-                                      type_tok.text, name_tok.text, is_mut);
+    return make_unique<FieldDeclNode>(
+        type_tok.line, type_tok.col,
+        type_tok.text, name_tok.text, is_mut);
 }
 
 // fn ::= "fn" ident ":=" "(" [ param { "," param } ] ")" "->" type NL block
@@ -253,9 +250,10 @@ std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
     if (!body->exit_stmt)
         throw error_at(kw_tok, "function '" + name.text + "' must end with 'exit'");
 
-    return make_unique<FunctionDeclNode>(kw_tok.line, kw_tok.col,
-                                         name.text, ret_type.text,
-                                         std::move(params), std::move(body));
+    return make_unique<FunctionDeclNode>(
+        kw_tok.line, kw_tok.col,
+        name.text, ret_type.text,
+        std::move(params), std::move(body));
 }
 
 // param ::= type ident
@@ -263,8 +261,9 @@ std::unique_ptr<FuncParamNode> Parser::parse_param()
 {
     Token type_tok = expect_type();
     Token name_tok = expect("identifier", "", "a parameter name");
-    return make_unique<FuncParamNode>(type_tok.line, type_tok.col,
-                                      type_tok.text, name_tok.text);
+    return make_unique<FuncParamNode>(
+        type_tok.line, type_tok.col,
+        type_tok.text, name_tok.text);
 }
 
 // statement ::= declaration | assignment | if_stmt | while_stmt
@@ -315,8 +314,9 @@ std::unique_ptr<StmtNode> Parser::parse_decl()
             where(name.line, name.col + (int)name.text.size()) +
             "variable '" + name.text + "' needs an initialiser in {}");
     auto init = parse_init();
-    return make_unique<DeclNode>(name.line, name.col,
-                                 type.text, name.text, is_mut, std::move(init));
+    return make_unique<DeclNode>(
+        name.line, name.col,
+        type.text, name.text, is_mut, std::move(init));
 }
 
 // assignment ::= identifier { "." identifier } ":=" expression
@@ -357,8 +357,9 @@ std::unique_ptr<ExprNode> Parser::parse_expr()
     {
         Token op = eat();
         auto right = parse_arith();
-        node = make_unique<BinaryOpNode>(op.line, op.col, op.text,
-                                         std::move(node), std::move(right));
+        node = make_unique<BinaryOpNode>(
+            op.line, op.col, op.text,
+            std::move(node), std::move(right));
     }
     return node;
 }
@@ -371,8 +372,9 @@ std::unique_ptr<ExprNode> Parser::parse_arith()
     {
         Token op = eat();
         auto right = parse_term();
-        node = make_unique<BinaryOpNode>(op.line, op.col, op.text,
-                                         std::move(node), std::move(right));
+        node = make_unique<BinaryOpNode>(
+            op.line, op.col, op.text,
+            std::move(node), std::move(right));
     }
     return node;
 }
@@ -385,8 +387,9 @@ std::unique_ptr<ExprNode> Parser::parse_term()
     {
         Token op = eat();
         auto right = parse_factor();
-        node = make_unique<BinaryOpNode>(op.line, op.col, op.text,
-                                         std::move(node), std::move(right));
+        node = make_unique<BinaryOpNode>(
+            op.line, op.col, op.text,
+            std::move(node), std::move(right));
     }
     return node;
 }
@@ -402,10 +405,9 @@ std::unique_ptr<ExprNode> Parser::parse_factor()
     if (at("identifier"))
     {
         Token t = eat();
-        // Check for call: ident "(" ...
         if (at("parentheses", "("))
         {
-            eat(); // consume '('
+            eat();
             std::vector<std::unique_ptr<ExprNode>> args;
             if (!at("parentheses", ")"))
             {
@@ -421,7 +423,6 @@ std::unique_ptr<ExprNode> Parser::parse_factor()
             expect("parentheses", ")", "')'");
             return make_unique<FunctionCallNode>(t.line, t.col, t.text, std::move(args));
         }
-        // Check for field access: ident "." ident ...
         if (at("dot", "."))
         {
             std::vector<std::string> fields;
@@ -462,8 +463,9 @@ std::unique_ptr<IfNode> Parser::parse_if()
         else_block = parse_block(kw::ELSE);
     }
 
-    return make_unique<IfNode>(kw_tok.line, kw_tok.col,
-                               std::move(cond), std::move(then_block), std::move(else_block));
+    return make_unique<IfNode>(
+        kw_tok.line, kw_tok.col,
+        std::move(cond), std::move(then_block), std::move(else_block));
 }
 
 // while_stmt ::= "while" expression NL block
@@ -472,8 +474,9 @@ std::unique_ptr<WhileNode> Parser::parse_while()
     Token kw_tok = eat();
     auto  cond   = parse_expr();
     end_of_line();
-    return make_unique<WhileNode>(kw_tok.line, kw_tok.col,
-                                  std::move(cond), parse_block(kw::WHILE));
+    return make_unique<WhileNode>(
+        kw_tok.line, kw_tok.col,
+        std::move(cond), parse_block(kw::WHILE));
 }
 
 // block ::= "{" NL { statement } [ exit_stmt NL ] "}" NL
@@ -505,8 +508,9 @@ std::unique_ptr<BlockNode> Parser::parse_block(const std::string& after) {
             eat(); end_of_line();
             if (stmts.empty() && !exit_node)
                 throw error_at(open, "empty block");
-            return make_unique<BlockNode>(open.line, open.col,
-                                          std::move(stmts), std::move(exit_node));
+            return make_unique<BlockNode>(
+                open.line, open.col,
+                std::move(stmts), std::move(exit_node));
         }
 
         if (exit_node)

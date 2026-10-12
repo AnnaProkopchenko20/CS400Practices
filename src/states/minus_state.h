@@ -12,7 +12,8 @@ public:
             ctx.changeState(StateId::Start);
             return true;
         }
-        else {
+        else
+        {
             ctx.emit("operator", "-", ctx.line, ctx.startCol);
             ctx.changeState(StateId::Start);
             return false;

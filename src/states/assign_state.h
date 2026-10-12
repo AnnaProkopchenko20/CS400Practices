@@ -1,7 +1,6 @@
 #pragma once
 #include "../lexer_context.h"
 
-// After ':' -- only ":=" is valid in Practice 5.
 class AssignState : public LexerState
 {
 public:

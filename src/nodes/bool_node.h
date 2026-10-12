@@ -1,10 +1,11 @@
 #pragma once
 #include "value_node.h"
 
-// Literal true / false.
 struct BoolNode : ValueNode {
     bool value;
-    BoolNode(int l, int c, bool v) : ValueNode(l, c), value(v) {}
+
+    BoolNode(int l, int c, bool val)
+        : ValueNode(l, c), value(val) {}
 
     void dump(int d) const override
     {

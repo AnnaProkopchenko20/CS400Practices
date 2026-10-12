@@ -19,7 +19,6 @@ struct StructInfo {
     std::map<std::string, int> field_index;
 };
 
-// Semantic analysis pass.
 class SemanticChecker : public Visitor
 {
 public:
@@ -37,8 +36,6 @@ public:
     llvm::Value* visit_var(VarNameNode& n)     override;
     llvm::Value* visit_not(NotNode& n)         override;
     llvm::Value* visit_binop(BinaryOpNode& n)  override;
-
-    // Practice 6 visitors
     llvm::Value* visit_struct_decl(StructDeclNode& n)         override;
     llvm::Value* visit_fn_decl(FunctionDeclNode& n)           override;
     llvm::Value* visit_fn_call(FunctionCallNode& n)           override;
@@ -58,7 +55,7 @@ private:
 
     DeclNode* lookup(const Node& at, const std::string& name);
     void check_assignable(const ExprNode& expr, const std::string& want,
-                          const Node& at, const std::string& what);
+        const Node& at, const std::string& what);
     void check_condition(ExprNode& cond, const Node& at, const char* keyword);
     void check_init_item(ExprNode& item, const std::string& expected_type);
     bool all_fields_mut(const std::string& type_name);

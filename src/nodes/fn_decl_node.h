@@ -15,10 +15,13 @@ struct FunctionDeclNode : Node {
     std::unique_ptr<BlockNode> body;
 
     FunctionDeclNode(int l, int c, std::string n, std::string ret,
-                     std::vector<std::unique_ptr<FuncParamNode>> p,
-                     std::unique_ptr<BlockNode> b)
-        : Node(l, c), name(std::move(n)), return_type(std::move(ret)),
-          params(std::move(p)), body(std::move(b)) {}
+        std::vector<std::unique_ptr<FuncParamNode>> p,
+        std::unique_ptr<BlockNode> b)
+        : Node(l, c)
+        , name(std::move(n))
+        , return_type(std::move(ret))
+        , params(std::move(p))
+        , body(std::move(b)) {}
 
     void dump(int d) const override {
         indent(d);

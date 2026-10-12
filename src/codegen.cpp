@@ -19,7 +19,7 @@ llvm::Type* CodeGen::llvm_type(const std::string& name)
 }
 
 llvm::Value* CodeGen::coerce(llvm::Value* value,
-                              const std::string& have, const std::string& want)
+    const std::string& have, const std::string& want)
 {
     if (have == "i32" && want == "i64")
         return builder.CreateSExt(value, i64_type, "wide");
@@ -65,7 +65,6 @@ void CodeGen::emit_exit(ExitNode& n)
 
 llvm::Value* CodeGen::visit_program(ProgramNode& n)
 {
-    // 1. Identified struct types
     for (auto& s : n.structs)
     {
         llvm::StructType* st = llvm::StructType::create(context, s->name);
@@ -88,7 +87,6 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
         struct_types[s->name]->setBody(member_types);
     }
 
-    // 2. Function prototypes (prefixed with "fn.")
     for (auto& fn : n.functions)
     {
         std::vector<llvm::Type*> param_types;
@@ -101,11 +99,9 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
         ir_functions[fn->name] = f;
     }
 
-    // 3. User function bodies
     for (auto& fn : n.functions)
         fn->accept(*this);
 
-    // 4. Main function
     current_fn = nullptr;
     llvm::FunctionType* ft = llvm::FunctionType::get(i32_type, false);
     main_func = llvm::Function::Create(
@@ -207,8 +203,8 @@ llvm::Value* CodeGen::visit_asmt(AsmtNode& n)
         std::string cur_type = n.decl->type_name;
         for (int index : n.path)
         {
-            ptr = builder.CreateStructGEP(llvm_type(cur_type), ptr, (unsigned)index,
-                                          n.name + ".ptr");
+            ptr = builder.CreateStructGEP(
+                llvm_type(cur_type), ptr, (unsigned)index, n.name + ".ptr");
             cur_type = structs[cur_type].fields[index].type;
         }
         val = coerce(val, n.expr->type, cur_type);
@@ -320,8 +316,8 @@ llvm::Value* CodeGen::visit_field_access(StructFieldAccessNode& n)
     std::string cur_type = n.base_decl->type_name;
     for (int index : n.path)
     {
-        ptr = builder.CreateStructGEP(llvm_type(cur_type), ptr, (unsigned)index,
-                                      n.base_name + ".ptr");
+        ptr = builder.CreateStructGEP(
+            llvm_type(cur_type), ptr, (unsigned)index, n.base_name + ".ptr");
         cur_type = structs[cur_type].fields[index].type;
     }
     return builder.CreateLoad(llvm_type(n.type), ptr, n.base_name + ".val");
