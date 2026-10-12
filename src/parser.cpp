@@ -311,7 +311,7 @@ std::unique_ptr<StmtNode> Parser::parse_decl()
     Token name = expect("identifier", "", "a variable name");
     if (!at("block", "{"))
         throw std::runtime_error(
-            where(name.line, name.col + (int)name.text.size()) +
+            where(name.line, name.col) +
             "variable '" + name.text + "' needs an initialiser in {}");
     auto init = parse_init();
     return make_unique<DeclNode>(
