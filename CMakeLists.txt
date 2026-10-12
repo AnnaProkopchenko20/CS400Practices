@@ -23,7 +23,15 @@ llvm_map_components_to_libnames(llvm_libs core support)
 
 file(GLOB_RECURSE SOURCES "src/*.cpp")
 
-add_executable(compiler ${SOURCES})
+add_executable(compiler ${SOURCES}
+        src/states/minus_state.h
+        src/nodes/fn_call_node.h
+        src/nodes/fn_decl_node.h
+        src/nodes/struct_decl_node.h
+        src/nodes/struct_field_access_node.h
+        src/nodes/field_decl_node.h
+        src/nodes/fn_param_node.h
+        src/nodes/init_node.h)
 target_link_libraries(compiler PRIVATE ${llvm_libs})
 
 target_include_directories(compiler PRIVATE

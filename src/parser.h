@@ -4,33 +4,19 @@
 #include <vector>
 
 #include "ast.h"
+#include "fn_param_node.h"
 #include "keywords.h"
 #include "lexer.h"
 
 // Recursive-descent parser: one method per grammar rule.
 // Tokens are presented grouped by source line; the end of a line is the NL terminal.
-//
-// program     ::= { statement } exit_stmt
-// statement   ::= declaration | assignment | if_stmt | while_stmt
-// declaration ::= type [ "mut" ] identifier "{" expression "}"
-// assignment  ::= identifier ":=" expression
-// if_stmt     ::= "if" expression NL block [ "else" NL block ]
-// while_stmt  ::= "while" expression NL block
-// block       ::= "{" NL { statement } [ exit_stmt NL ] "}" NL
-// exit_stmt   ::= "exit" factor
-// type        ::= "i32" | "i64" | "bool"
-// expression  ::= arith [ ( "==" | "!=" ) arith ]
-// arith       ::= term { ( "+" | "-" ) term }
-// term        ::= factor { "*" factor }
-// factor      ::= number | "true" | "false" | identifier | "!" factor
-//
 // Errors are thrown as std::runtime_error("line L:C: message").
 class Parser
 {
 public:
     explicit Parser(const std::vector<std::vector<Token>>& lines);
 
-    std::unique_ptr<ProgramNode> parse_program();
+    std::unique_ptr<ProgramNode> parse_program(); // needst to change
 
 private:
     const std::vector<std::vector<Token>>& lines;
@@ -53,7 +39,7 @@ private:
     void end_of_line();
 
     std::unique_ptr<StmtNode>  parse_statement();
-    std::unique_ptr<StmtNode>  parse_decl();
+    std::unique_ptr<StmtNode>  parse_decl(); // needs to change
     std::unique_ptr<StmtNode>  parse_assign();
     std::unique_ptr<ExitNode>  parse_exit();
     std::unique_ptr<IfNode>    parse_if();
@@ -63,4 +49,12 @@ private:
     std::unique_ptr<ExprNode>  parse_arith();
     std::unique_ptr<ExprNode>  parse_term();
     std::unique_ptr<ExprNode>  parse_factor();
+
+    std::unique_ptr<StructDeclNode>  parse_struct_decl();
+    std::unique_ptr<FunctionCallNode>  parse_fn_call();
+    std::unique_ptr<FunctionDeclNode>  parse_fn_decl();
+    std::unique_ptr<InitNode>  parse_init();
+    std::unique_ptr<StructFieldAccessNode>  parse_struct_field_access();
+    std::unique_ptr<FieldDeclNode>  parse_field_decl();
+    std::unique_ptr<FuncParamNode>  parse_param();
 };

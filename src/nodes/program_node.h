@@ -8,6 +8,8 @@
 // The mandatory top-level exit_stmt is a separate field (not in stmts), which
 // structurally enforces that the program must end with exit.
 struct ProgramNode : Node {
+    std::vector<std::unique_ptr<StructDeclNode>> structs;
+    std::vector<std::unique_ptr<FunctionDeclNode>> functions;
     vector<unique_ptr<StmtNode>> stmts;
     unique_ptr<ExitNode>         exit_stmt;   // always non-null after a successful parse
 

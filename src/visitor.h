@@ -16,5 +16,6 @@ struct Visitor {
     virtual llvm::Value* visit_if(IfNode&)            = 0;
     virtual llvm::Value* visit_block(BlockNode&)      = 0;
     virtual llvm::Value* visit_not(NotNode&)          = 0;
-    virtual llvm::Value* visit_while(WhileNode&)      = 0;
+
+    //visitor functions for all new node types
 };

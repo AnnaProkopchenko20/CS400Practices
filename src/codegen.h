@@ -45,6 +45,9 @@ struct CodeGen : Visitor
     llvm::Value* visit_not(NotNode& n)         override;
     llvm::Value* visit_binop(BinaryOpNode& n)  override;
 
+    // new visitors for all new nodes
+    // take suggestions from the practice on implementation details
+
 private:
     llvm::Type*       llvm_type(const std::string& name);
     llvm::Value*      coerce(llvm::Value* v, const std::string& have, const std::string& want);

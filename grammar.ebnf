@@ -1,3 +1,36 @@
+practice6 ebnf:
+
+program     ::= { struct } { fn } { statement } exit_stmt
+
+struct      ::= "struct" ident NL "{" NL field_decl { field_decl } "}" NL
+field_decl  ::= type [ "mut" ] ident NL
+
+fn          ::= "fn" ident ":=" "(" param { "," param } ")" "->" type NL block
+param       ::= type ident
+
+block       ::= "{" NL { statement } [ exit_stmt NL ] "}" NL
+
+statement   ::= declaration | assign | if_stmt | while_stmt
+declaration ::= type [ "mut" ] ident init
+assign      ::= ident { "." ident } ":=" expression
+if_stmt     ::= "if" expression NL block [ "else" NL block ]
+while_stmt  ::= "while" expression NL block
+exit_stmt   ::= "exit" factor
+
+type        ::= "i32" | "i64" | "bool" | ident
+
+init        ::= "{" value { "," value } "}"
+value       ::= expression | init
+
+expression  ::= arith [ ( "==" | "!=" ) arith ]
+arith       ::= term { ( "+" | "-" ) term }
+term        ::= factor { "*" factor }
+factor      ::= number | "true" | "false" | ident | field | call | "!" factor
+
+field       ::= ident "." ident { "." ident }
+call        ::= ident "(" [ expression { "," expression } ] ")"
+
+
 practice5 ebnf:
 
 program     ::= { statement } exit_stmt

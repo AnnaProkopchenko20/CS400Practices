@@ -12,6 +12,13 @@ namespace kw
     inline constexpr const char* I64    = "i64";
     inline constexpr const char* BOOL   = "bool";
 
+    // Functions
+    inline constexpr const char* FN    = "fn";
+
+    // Declaring Types
+    inline constexpr const char* STRUCT = "struct";
+
+
     // Mutability modifier
     inline constexpr const char* MUT    = "mut";
 

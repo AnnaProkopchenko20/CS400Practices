@@ -26,6 +26,16 @@ public:
     llvm::Value* visit_not(NotNode& n)         override;
     llvm::Value* visit_binop(BinaryOpNode& n)  override;
 
+
+//     // new visitors for all new nodes
+//     Semantics. Extend the semantic pass to check types and mut for the new constructs:
+// • A call has the result type of its function: a call of an i64 function cannot initialise an i32 variable.
+//  (while checking for overflows in expressions as ussual)
+// • The number and the types of the arguments match the parameters. An i32 argument may go into an i64
+// parameter. ( while visting the function call)
+// • Every link of a chain exists. A write through x1.x2.x3 needs every link to be mut: the object and each field on
+// (while visiting the struct field access node)
+
 private:
     using Scope = std::map<std::string, DeclNode*>;
     std::vector<Scope> scopes;

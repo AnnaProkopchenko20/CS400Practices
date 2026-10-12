@@ -258,8 +258,7 @@ std::unique_ptr<WhileNode> Parser::parse_while()
 }
 
 // block ::= "{" NL { statement } [ exit_stmt NL ] "}" NL
-std::unique_ptr<BlockNode> Parser::parse_block(const std::string& after)
-{
+std::unique_ptr<BlockNode> Parser::parse_block(const std::string& after) {
     const std::vector<Token>* nl = peek_line();
     if (!nl)
         throw std::runtime_error(
@@ -305,3 +304,4 @@ std::unique_ptr<BlockNode> Parser::parse_block(const std::string& after)
         }
     }
 }
+
