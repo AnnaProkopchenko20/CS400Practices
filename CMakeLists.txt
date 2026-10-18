@@ -31,7 +31,13 @@ add_executable(compiler ${SOURCES}
         src/nodes/struct_field_access_node.h
         src/nodes/field_decl_node.h
         src/nodes/fn_param_node.h
-        src/nodes/init_node.h)
+        src/nodes/init_node.h
+        src/nodes/read_node.h
+        src/nodes/print_node.h
+        src/nodes/field_access_node.h
+        src/nodes/member_access_node.h
+        src/nodes/member_fn_call_node.h
+        src/nodes/member_fn_decl_node.h)
 target_link_libraries(compiler PRIVATE ${llvm_libs})
 
 target_include_directories(compiler PRIVATE
