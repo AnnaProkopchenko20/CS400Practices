@@ -1,3 +1,4 @@
+#include "string_state.h"
 #pragma once
 #include "assign_state.h"
 #include "equals_state.h"
@@ -18,6 +19,7 @@ inline std::unique_ptr<LexerState> makeState(StateId id)
         case StateId::Equals:     return std::make_unique<EqualsState>();
         case StateId::Negation:   return std::make_unique<NegationState>();
         case StateId::MinusState: return std::make_unique<MinusState>();
+        case StateId::String:     return std::make_unique<StringState>();
     }
     return nullptr;
 }

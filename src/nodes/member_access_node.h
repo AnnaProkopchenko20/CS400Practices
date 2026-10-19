@@ -1,6 +1,6 @@
 #pragma once
+#include "value_node.h"
 
 struct MemberAccessNode : ValueNode {
-    // return type
-
+    using ValueNode::ValueNode;
 };

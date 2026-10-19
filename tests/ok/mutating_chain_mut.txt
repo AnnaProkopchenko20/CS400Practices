@@ -1,0 +1,20 @@
+struct Point
+{
+    i32 mut x
+    i32 mut y
+    fn shift := (i32 dx) -> i32
+    {
+        x := x + dx
+        exit x
+    }
+}
+struct Circle
+{
+    Point mut center
+    i32 mut radius
+}
+Point p{10, 20}
+Circle mut c{p, 5}
+i32 nx{c.center.shift(3)}
+i32 result{nx + c.center.x}
+exit result

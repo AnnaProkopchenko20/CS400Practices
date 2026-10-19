@@ -1,0 +1,21 @@
+struct Node
+{
+    i32 mut val
+    fn stepA := (i32 n) -> i32
+    {
+        if n == 0
+        {
+            exit val
+        }
+        i32 r{stepB(n - 1)}
+        exit r
+    }
+    fn stepB := (i32 n) -> i32
+    {
+        val := val + 1
+        i32 r{stepA(n)}
+        exit r
+    }
+}
+Node n{0}
+exit n.stepA(2)

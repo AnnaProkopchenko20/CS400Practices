@@ -1,0 +1,6 @@
+struct Box
+{
+    i32 print
+}
+Box b{1}
+exit b.print

@@ -1,0 +1,10 @@
+struct Box
+{
+    i32 x
+    fn print := () -> i32
+    {
+        exit x
+    }
+}
+Box b{1}
+exit b.print()

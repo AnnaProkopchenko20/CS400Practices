@@ -157,3 +157,1216 @@ Prompt 6 (Practice 6 Comment & Grammar Audit):
   * Cataloged 25 STALE comments, 10 MISSING comments/rules, 3 WRONG-NEW comments, and 3 active TODO markers.
   * Identified 10 code-level discrepancies (such as token kinds `"parentheses"` vs `"paren"`, `"operator"` vs `"arrow"`, unhandled `MinusState` in factory, and missing `fn`/`struct` in `keyword_table`).
   * Preserved existing code and comment files without modifications prior to user review and approval.
+
+================================================================================
+AI USAGE REPORT - PRACTICE 7: MEMBER FUNCTIONS, READ/PRINT & CHAIN CALLS
+================================================================================
+
+1. TOOLS USED
+-------------
+- Model / Assistant: Anthropic Claude Sonnet 4.6 & Google Antigravity (Gemini 3.8 Flash / Gemini 3.1 Pro)
+- Additional Tooling:
+  * CMake 3.20+ & GCC 13 (C++20)
+  * LLVM 18 C++ API (llvm::IRBuilder, llvm::Module, llvm::Function, llvm::StructType, llvm::AllocaInst, etc.)
+  * WSL (Ubuntu on Windows)
+  * Bash / WSL test harness (run.sh with lli and llvm-as)
+  * Python 3 (transcript parsing, test verification, batch generation)
+
+2. KEY PROMPTS
+--------------
+Prompt 1 (Practice 7 Initial Specification & Architecture Scope):
+"# Task: implement Practice 7 (member functions, read/print) in my C++ LLVM compiler
+
+You are working on a C++ compiler for a course language (Languages and Compilers Design, Practice 7 and Project Stage 2). Everything from earlier practices must keep working. Code generation must use llvm::IRBuilder only, never IR assembled from strings.
+
+## Step 0: read and proofread BEFORE changing anything
+Read all of these, then reply with a list of problems you found and wait for my confirmation:
+- The AST node headers, including the new ones with my comments: member_fn_call_node.h, member_fn_decl_node.h, field_access_node.h, member_access_node.h, print_node.h, read_node.h, struct_decl_node.h, fn_decl_node.h, fn_call_node.h, fn_param_node.h
+- visitor.h, parser.h, parser.cpp, semantic_checker.h/.cpp, compiler.cpp
+- The lexer and lexer_context files. Use them as the single source of truth for keywords and token kinds. Do not hardcode names like "i32" or "print" as string literals when the lexer/kw constants exist.
+- The spec: w07-practice.pdf
+
+Known problems in the stubs (confirm and list any others):
+- `accept` in ReadNode and PrintNode calls `visit_asmt`. MemberFnCallNode calls `visit_field_access`. MemberFnDeclNode calls `visit_fn_decl`, which takes a FunctionDeclNode. Each new node needs its own visitor method.
+- Missing constructors, includes and #pragma dependencies. `dump` is missing on several nodes. StructDeclNode::dump ignores member_fns.
+- The old flat StructFieldAccessNode (base_name + field_names) conflicts with the new design below.
+
+## Design decisions (already made, do not redesign)
+
+### AST
+- **Chains are left-nested trees.** `c.center.d2()` is `MemberCallNode(object=FieldAccessNode(object=VarNameNode c, "center"), "d2")`. The parser never resolves types.
+- `FieldAccessNode : ValueNode` has `std::unique_ptr<ExprNode> object`, `std::string field_name`, and `int field_index = -1` (checker fills it). It inherits `type`.
+- `MemberCallNode : ValueNode` has `object`, `fn_name`, `args`, and `MemberFnDeclNode* fn = nullptr` (checker fills it). It inherits `type`.
+- `object` is an `ExprNode` because the left side can be a variable, a field access or a call. No `StructDeclNode*` on these nodes: the struct is always found through `structs[object->type]`.
+- Link nodes take their line:col from the **dot token** (the spec reports `p.d2().x` "at that `.`").
+- `AsmtNode` stays **flat** (name + field_names), since assignment only has names. It needs an extra "root is a field of `this`" annotation.
+- `MemberFnDeclNode` should reuse/derive from FunctionDeclNode logic where sensible. It needs a pointer to its owning struct and a `mutates` flag (not `is_const`, which already means "variable is const"). Its dump prints `MemberFn name -> type`.
+- `PrintNode` holds either one `ExprNode` or a string literal. `ReadNode` has no fields, and its type is always i32.
+- `--ast` must dump every new node. Expected shapes: `MemberFn d2 -> i32`, `MemberCall d2` with a child `Field c.center`.
+- The checker only annotates nodes, it does not replace them (visit methods return llvm::Value*, so there is no channel for rewriting).
+
+### Parser
+- `parse_factor` becomes a flat dispatcher with early returns: `!` (NotNode), `parse_number`, `parse_bool`, `parse_read`, and an identifier going to `parse_identifier_chain`. Anything else is an error. It never accepts a string token.
+- `parse_identifier_chain` parses a call or a variable, then loops while the next token is `.`. After the name: `(` means `parse_member_call(left, dot_token)`, otherwise `parse_field_access(left, dot_token)`. Each helper takes the left node and returns the wrapped node.
+- Extract the shared helpers `parse_params`, `parse_args` and the shared tail of function parsing (params, `->`, type, block, "must end with exit"), and use them for both global and member functions. Remove the three nested `while(true){...comma...}` loops and the deep nesting.
+- `parse_struct_decl`: in the loop, check for `}` first, then `fn`, then a field. A field after a member function is an error at that field. A member function before the first field is an error at its `fn`. Duplicate names are checker errors, not parser errors.
+- `parse_member_fn` uses the shared function-parsing helper. `parse_print`, `parse_string` and `parse_read` are new. `parse_statement` calls `parse_print`. `parse_print` accepts a string literal or `parse_expr()`, then `)`.
+- Most error cases need no extra code: `print()`, `print(a, b)`, `read(5)`, `print` used as a value, a string literal outside `print`, and a bare call or call on the left of `:=` ("expected ':='"). Verify each against the lexer's keyword/token kinds.
+- Update parser.h with all new methods.
+
+### Visitor
+- Add visit methods for MemberCall, Print, Read, String (if a node exists) and any new decl node. Add **empty stubs** in SemanticChecker (and the generator) so the project still builds until they are implemented.
+
+### Semantic checker (phases, in this order, orchestrated by visit_program)
+1. Register all structs in order (fields only; field types must be declared above; no self-containment).
+2. For every struct, declare member function signatures. All struct names exist now, so `Point.moved -> Point` is fine. Check: field vs member function name clash, duplicate member functions, known parameter/return types.
+3. Declare global function signatures (clash with structs, known types).
+4. Check **member function bodies** (`current_struct` and `current_fn` set). Record direct mutation and call edges. **Defer** mutating-call validation.
+5. Fixed point: mark member functions that assign a field of `this`, then repeat until no new function is marked (a function with an edge to a mutating function becomes mutating).
+6. Validate the deferred call sites.
+7. Check global function bodies, then the top-level statements and exit. Flags are final, so mutating calls are validated immediately.
+- Member bodies may call global functions: only the signature is needed. Global calls create no mutation edges (arguments are copies).
+- **Name lookup inside a member function:** parameters and locals first, then the fields of the current struct. `lookup` returns a small result type (local `DeclNode*`, field-of-this with index and type, or not found). Annotate `VarNameNode` and `AsmtNode` with "field N of this". Calls `f(...)`: member functions of the current struct first, then global functions. `FunctionCallNode` records which case it resolved to. The body does not see top-level variables.
+- **Mutation rule:** a member function is mutating if it assigns to a field of `this` or calls a mutating member function on `this` or on a field chain rooted at `this`. A local or parameter with the same name as a field does not count. A mutating function may only be called through a chain where every link is mut (the object and each field). Non-mutating functions can be called on anything. A const field cannot be assigned, also inside a member function.
+- **Chain checking:** visit `object` first, then use `object->type`. If it is not a struct, report an error at this node. Check that the field or member exists, argument count, argument types (i32 widens to i64), and set `type`. Extract one shared argument-checking helper for global and member calls. `Point.d2()` (call on a type) must give an accurate error. `.` after a non-struct result is an error at that `.`. A call result may be read and have any member function called on it, but not assigned to.
+- `print` is a statement with no value, accepts i32/i64/bool/string/struct, and has the reserved name rule. `read()` is i32, takes no arguments, and the name is reserved.
+- **Reserved names:** check the lexer's keyword table instead of repeated `|| == "i32"` string comparisons. If the parser already rejects keywords through `expect("identifier")`, remove the dead checker code. The checker owns only the clash among struct, function and member function names.
+- Consolidate the repeated checks into helpers: `is_builtin_type`, `is_known_type`, `check_new_name`.
+- Still undecided, ask me: may a local reuse a parameter's name?
+
+### Code generation (later, do not start until I ask)
+- Member function IR name: `Point.shift`, built by one helper `member_fn_ir_name(struct, fn)` used by declaration, definition and every call. No `fn.` prefix on member functions. Global functions keep the prefix the project already uses.
+- First parameter is a pointer to the object (`this`). Calls pass the object's address: the alloca, a gep for field chains, or a temporary alloca for a call result.
+- Generator needs "address of expression" and "value of expression" operations. Fields in a member body are a gep on `this`.
+- `print` of a struct is a recursive helper over `structs[type].fields`: gep, load, printf per field, no new code per struct. Formats are global constants (`%d`, `%lld`, `%s` with select for bool). The newline is printed once at the very end. Declare printf/scanf once. `read` uses scanf into an alloca in the entry block.
+
+## How to work
+1. Do Step 0 and report issues. Stop.
+2. After I confirm, implement in this order and stop after each so I can review: (a) node headers + visitor stubs + `dump`, (b) parser, (c) checker. Do not touch codegen or the lexer unless I say so.
+3. Keep functions short and flat: no triple-nested ifs, use early returns and helpers.
+4. If a decision is not covered here, ask me instead of guessing. Do not generate everything at once.
+
+The current project i am working on is in the folder in practices/practice1
+keep in mind that you are working on wsl and you are NOT to commit anything on you own"
+
+Prompt 2 (Semantic Scoping Rule Clarification):
+"shadowing in the inner block of functions is allowed"
+
+Prompt 3 (Comprehensive Test Suite Specification & Hand-Calculated Oracle Rules):
+"# Task: write the test suite for Practice 7 / Stage 2 (member functions, read, print)
+
+You are writing tests for my C++ compiler for a course language. The features under test are structs with member functions, `read()`, `print`, chains (`c.center.d2()`), the mutation rule, and IR function naming. Do NOT modify the compiler, parser, checker or lexer. Only add files under tests/ and touch the test script if it needs new capabilities.
+
+## Step 0: inspect before writing
+1. Look at the existing tests/ layout, file extensions, and the test script. Follow the existing conventions exactly (program extension, `.expected`, error-expectation format, `NAME.in`). If something is unclear, ask me.
+2. Read the spec files w07-practice.pdf and w07-project-stage2.pdf, plus lexer/lexer_context for the exact keyword list. Use only syntax that the spec grammar allows. Notable rules: no grouping parentheses, no unary minus, `exit` takes one factor (never an operation), a call alone is not a statement, fields come before member functions, blocks need `{` on its own line.
+3. Report what you found and any spec ambiguity, then write the tests.
+
+## Hard rules for expected files
+- **Compute every expected output by hand** from the language semantics. Never run the compiler and paste its output as the expectation. If the compiler later disagrees with a hand-computed value, flag it, do not "fix" the expectation.
+- Show your arithmetic in a comment in your reply (not in the test files), so I can check it.
+- A program's expected file holds exactly what it prints, including the final `Program exit with result N` line. Output of `print` comes before the exit line.
+- Error tests expect one stderr line `compilation error: line L:C: message`. Wording is mine, so compare the `line L:C` part (and match the existing convention for the message). Work out L:C by hand from the spec rules, e.g. at the `.` for a bad chain, at the field for a field after a member function, at the opening `"` for an unclosed literal.
+- Each test file gets a one-line comment-free filename that says what it checks (`member_two_args`, `err_field_after_fn`). Keep programs small: one rule per program.
+
+## Valid programs (tests/ok), aim for at least 14
+Regression (copy the spec programs, expected values come from the spec):
+- Practice 7 Task 1 program: `Program exit with result 83`
+- Practice 7 +1 program (call in the middle of a chain): `46`
+- Practice 6 Task 3 program: `28`; fib(10): `55`; Practice 6 +1 nested init: `36`
+- Practice 7 Task 3 program with `NAME.in` containing `3 4`; expected output is the 7 lines given in the spec
+
+New:
+1. `member_noargs`: Point{3,4}, `exit p.d2()` -> 25
+2. `member_two_args`: member `add := (i32 a, i32 b)` returning `x + a + b`, on Point{1,2} called with (3,4) -> 8
+3. `member_calls_member`: a member that calls another member by bare name (`d2()` inside Point) and doubles it -> 50 for Point{3,4}
+4. `member_recursion`: member `fact` on a struct with one dummy field, `fact(5)` -> 120 (bare recursive call resolves to the member)
+5. `member_mutual_recursion`: two members calling each other in a cycle on the same struct (even/odd on a counter, `even(10)` -> `true` printed via print, exit 0)
+6. `shadow_param_local`: parameter named like a field hides the field; a local named like a field that is assigned does NOT make the function mutating (so it may be called on a const object). Expected sum computed by hand
+7. `print_all_kinds`: print of a string with `%` and a literal backslash-n, a negative i32, an i64 above 2^31, a bool true and false. Literal output must show `\n` as two characters
+8. `print_nested_struct`: Circle{center: Point{x: 3, y: 4}, radius: 2} format exactly as in the spec, plus printing a struct returned by a call (`print(makePoint(1, 2))`) and a field chain (`print(c.center)`)
+9. `mutating_chain_mut`: `Circle mut c{...}` with mut center, call a mutating member through `c.center.shift(1)`, then read the field
+10. `i32_into_i64_param`: member and global function with an i64 parameter called with an i32 argument
+11. `read_in_call_args`: `add(read(), read())` and `exit read()` with a `.in` file
+
+## Invalid programs (tests/err), aim for at least 16
+Syntax and order: field after a member function; member function before the first field; `Point.d2()` (call on a type); `p.d2().x` when the result is not a struct (error at that `.`); `print()`; `print(1, 2)`; `i32 x{print(1)}`; a string literal outside print (`i32 x{"a"}`); a string literal not closed on its line; `read(5)`.
+Semantics: unknown field; unknown member function (`c.d2()` on Circle); call on an i32 (`i.f()`); wrong argument count for a member call; wrong argument type for a member call; exit of the wrong type inside a member function; assignment to a const field inside a member function; unknown name inside a member function (a top-level variable is NOT visible); mutating call on a const object; mutating call through a const field; a mutating call that is only mutating through a cycle of members (tests the fixed point: A calls B, B assigns a field, call A on a const object); `p.moved(1).x := 5` (assigning to a call result).
+Names: a variable, function, parameter, field or member function called `read` or `print`; a struct and a global function with the same name; a field and a member function with the same name; two member functions with the same name in one struct.
+
+## The fun one: break the function naming rules in the IR
+Goal: collide the names the compiler builds for LLVM functions. Member functions are named `Struct.member` (single helper); global functions get the project's prefix. Runtime symbols are `printf`, `scanf`, `main`. Read the code generator to learn the exact global prefix and write the tests so they depend on behaviour, not on the spelling.
+
+`name_torture_runtime` (tests/ok, must compile, verify and run):
+```
+struct Box
+{
+    i32 mut v
+    fn main := () -> i32
+    {
+        v := v + 1
+        exit v
+    }
+    fn printf := (i32 k) -> i32
+    {
+        i32 r{v + k}
+        exit r
+    }
+    fn scanf := (i32 k) -> i32
+    {
+        i32 a{main()}
+        i32 b{printf(k)}
+        i32 r{a + b}
+        exit r
+    }
+}
+fn main := () -> i32
+{
+    exit 100
+}
+fn printf := (i32 a) -> i32
+{
+    i32 r{a * 2}
+    exit r
+}
+fn scanf := (i32 a) -> i32
+{
+    i32 r{a * 3}
+    exit r
+}
+Box mut b{10}
+i32 x{main()}
+i32 y{printf(5)}
+i32 z{scanf(7)}
+i32 p{b.main()}
+i32 q{b.printf(5)}
+i32 s{b.scanf(1)}
+print(x)
+print(y)
+print(z)
+print(p)
+print(q)
+print(s)
+print(b)
+exit b.v
+```
+Expected (hand-checked): 100, 10, 21, 11, 16, 25, `Box{v: 12}`, then `Program exit with result 12`. Inside Box, bare `main()` and `printf(k)` must resolve to the members (they hide the globals), while at top level they resolve to the globals. If the program fails with a DuplicatedNameError, a verifier error, or a wrong number, the naming is broken.
+
+`name_torture_underscores` (tests/ok): the case that kills `Struct_member` naming:
+```
+struct A_b
+{
+    i32 x
+    fn c := () -> i32
+    {
+        exit x
+    }
+}
+struct A
+{
+    i32 x
+    fn b_c := () -> i32
+    {
+        i32 r{x + 1}
+        exit r
+    }
+}
+fn A_b_c := () -> i32
+{
+    exit 1000
+}
+A_b p{5}
+A q{7}
+i32 r{p.c() + q.b_c() + A_b_c()}
+exit r
+```
+Expected: `Program exit with result 1013`.
+
+Also add:
+- `name_torture_struct_vs_fn_err` (tests/err): a struct and a global function named `main` -> error at the function (type/function share one table).
+- `name_torture_reserved_err`: a function named `printf` is VALID (put it in tests/ok with a tiny program, expected value by hand), but a function named `print` or `read` is an error.
+- An IR-level check, if the test script can host one: after compiling `name_torture_runtime`, extract all `define` names from the .ll and assert they are unique, that `main` and `printf`/`scanf` are not defined by user code (only the generated entry `main`), and that the module passes `llvm-as` / `opt -verify`. Report if the script has no place for this and ask me before adding a new mechanism.
+
+## Test script
+- It must compile, run (lli or llc+clang), and compare stdout with the whole `.expected` file. When `NAME.in` exists, feed it as stdin.
+- Error tests: compiler exit code non-zero, no output file written, stderr is exactly one line starting with `compilation error:` and containing the expected `line L:C`.
+- Print a pass/fail line per test and a final count, exit non-zero if anything fails.
+
+## How to work
+1. Do Step 0 and report. Stop.
+2. After I confirm, write the tests in batches: regression copies, new valid programs, error programs, then the naming-torture group.
+3. Finish with a table: test name, rule it covers, hand-computed expected value or expected error position. Do not run or "fix" the compiler. Ask me when a rule in the spec is ambiguous, instead of guessing."
+
+Prompt 4 (Test Plan Approval):
+"confirm"
+
+Prompt 5 (Initial Test Execution & Compiler Diagnostic Failure Analysis):
+"fix the code or the tests
+aniia@Yukichi:~/CS400/practices/practice1$ ./run.sh
+[ 14%] Building CXX object CMakeFiles/compiler.dir/src/codegen.cpp.o
+[ 28%] Building CXX object CMakeFiles/compiler.dir/src/compiler.cpp.o
+[ 42%] Building CXX object CMakeFiles/compiler.dir/src/lexer.cpp.o
+[ 57%] Building CXX object CMakeFiles/compiler.dir/src/main.cpp.o
+[ 71%] Building CXX object CMakeFiles/compiler.dir/src/parser.cpp.o
+[ 85%] Building CXX object CMakeFiles/compiler.dir/src/semantic_checker.cpp.o
+[100%] Linking CXX executable compiler
+[100%] Built target compiler
+PASS     exit_in-arm
+FAIL     i32_into_i64_param
+--- tests/ok/i32_into_i64_param.expected        2026-10-18 20:52:52.266920090 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.032876923 +0000
+@@ -1 +1 @@
+-Program exit with result 25
++compilation error: line 4:5: expected a type, got 'fn'
+PASS     if-else_basic
+PASS     if-else_basic [ast]
+PASS     if-else_nested-merge
+PASS     if-else_nested
+PASS     if-else_nested [ast]
+PASS     if-else_phi
+PASS     if_no-else
+FAIL     member_calls_member
+--- tests/ok/member_calls_member.expected       2026-10-18 20:52:52.265690806 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.408747660 +0000
+@@ -1 +1 @@
+-Program exit with result 50
++compilation error: line 5:5: expected a type, got 'fn'
+FAIL     member_mutual_recursion
+--- tests/ok/member_mutual_recursion.expected   2026-10-18 20:52:52.265997353 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.421561435 +0000
+@@ -1,2 +1 @@
+-true
+-Program exit with result 0
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     member_noargs
+--- tests/ok/member_noargs.expected     2026-10-18 20:52:52.265383002 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.442917727 +0000
+@@ -1 +1 @@
+-Program exit with result 25
++compilation error: line 5:5: expected a type, got 'fn'
+FAIL     member_recursion
+--- tests/ok/member_recursion.expected  2026-10-18 20:52:52.265840828 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.464274018 +0000
+@@ -1 +1 @@
+-Program exit with result 120
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     member_two_args
+--- tests/ok/member_two_args.expected   2026-10-18 20:52:52.265538451 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.481359052 +0000
+@@ -1 +1 @@
+-Program exit with result 8
++compilation error: line 5:5: expected a type, got 'fn'
+FAIL     mutating_chain_mut
+--- tests/ok/mutating_chain_mut.expected        2026-10-18 20:52:52.266738740 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.502715344 +0000
+@@ -1 +1 @@
+-Program exit with result 26
++compilation error: line 5:5: expected a type, got 'fn'
+PASS     name_torture_printf_valid
+FAIL     name_torture_runtime
+--- tests/ok/name_torture_runtime.expected      2026-10-18 20:52:52.267306611 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.600954286 +0000
+@@ -1,8 +1 @@
+-100
+-10
+-21
+-11
+-16
+-25
+-Box{v: 12}
+-Program exit with result 12
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     name_torture_runtime [ircheck]
+grep: /tmp/tmp.GKboTkdE2J/out.ll: No such file or directory
+IR check failed: expected exactly 1 runtime main, found 0
+FAIL     name_torture_underscores
+--- tests/ok/name_torture_underscores.expected  2026-10-18 20:52:52.268178242 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:49.656480645 +0000
+@@ -1 +1 @@
+-Program exit with result 1013
++compilation error: line 4:5: expected a type, got 'fn'
+PASS     not_bool
+PASS     not_in-condition
+PASS     not_in-condition [ast]
+PASS     not_precedence
+PASS     not_precedence [ast]
+PASS     p3_v01_precedence
+PASS     p3_v01_precedence [ast]
+PASS     p3_v02_star_middle
+PASS     p3_v02_star_middle [ast]
+PASS     p3_v03_minus_chain
+PASS     p3_v03_minus_chain [ast]
+PASS     p3_v04_assign_expr
+PASS     p3_v05_task4
+PASS     p3_v06_practice2
+PASS     p3_v06_practice2 [ast]
+PASS     p3_v07_spacing
+PASS     p3_v08_vars_chain
+PASS     p3_v09_exit_const
+PASS     p4_v01_task1_sum
+PASS     p4_v01_task1_sum [ast]
+PASS     p4_v02_task1_bool_exit
+PASS     p4_v03_i64_widen
+PASS     p4_v04_sext_negative
+PASS     p4_v05_i64_const
+PASS     p4_v06_compare_mixed_width
+PASS     p4_v07_compare_mixed_false
+PASS     p4_v08_bool_compare
+PASS     p4_v09_exit_true_literal
+PASS     p4_v10_assign_widen
+PASS     p6_v01_nested_chain
+PASS     p6_v02_field_write
+PASS     p6_v03_struct_param
+PASS     p6_v04_struct_result
+PASS     p6_v05_nested_calls
+PASS     p6_v06_i32_to_i64_param
+PASS     p6_v07_nested_init
+FAIL     print_all_kinds
+--- tests/ok/print_all_kinds.expected   2026-10-18 20:52:52.266311662 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:51.716187190 +0000
+@@ -1,6 +1 @@
+-100% discount\nno newline
+--9
+-6000000000
+-true
+-false
+-Program exit with result 0
++compilation error: line 5:7: unexpected byte '"'
+FAIL     print_nested_struct
+--- tests/ok/print_nested_struct.expected       2026-10-18 20:52:52.266458621 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:51.733014802 +0000
+@@ -1,4 +1 @@
+-Circle{center: Point{x: 3, y: 4}, radius: 2}
+-Point{x: 1, y: 2}
+-Point{x: 3, y: 4}
+-Program exit with result 0
++compilation error: line 18:1: cannot start a statement with 'print'
+FAIL     read_in_call_args
+--- tests/ok/read_in_call_args.expected 2026-10-18 20:52:52.267076975 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:51.754049317 +0000
+@@ -1,2 +1 @@
+-35
+-Program exit with result 7
++compilation error: line 6:11: expected a constant, variable, or '!', got 'read'
+PASS     regress_p6_fib
+PASS     regress_p6_nested_init
+PASS     regress_p6_task3
+FAIL     regress_p7_middle_chain
+--- tests/ok/regress_p7_middle_chain.expected   2026-10-18 20:52:52.264323263 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:51.981222083 +0000
+@@ -1 +1 @@
+-Program exit with result 46
++compilation error: line 5:5: expected a type, got 'fn'
+FAIL     regress_p7_task1
+--- tests/ok/regress_p7_task1.expected  2026-10-18 20:52:52.264148681 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.002256598 +0000
+@@ -1 +1 @@
+-Program exit with result 83
++compilation error: line 5:5: expected a type, got 'fn'
+FAIL     regress_p7_task3
+--- tests/ok/regress_p7_task3.expected  2026-10-18 20:52:52.265154665 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.023291114 +0000
+@@ -1,7 +1 @@
+-p and c:
+-Point{x: 3, y: 4}
+-Circle{center: Point{x: 3, y: 4}, radius: 2}
+-7
+-6000000000
+-true
+-Program exit with result 2
++compilation error: line 14:7: unexpected byte '"'
+PASS     scope_shadow-type
+FAIL     shadow_param_local
+--- tests/ok/shadow_param_local.expected        2026-10-18 20:52:52.266148494 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.107429175 +0000
+@@ -1 +1 @@
+-Program exit with result 26
++compilation error: line 4:5: expected a type, got 'fn'
+PASS     while_exit-in-body
+PASS     while_sum
+PASS     while_sum [ast]
+PASS     block_brace-missing
+PASS     block_brace-on-if-line
+PASS     block_empty
+PASS     block_never-closed
+PASS     block_statement-after-exit
+PASS     else_without-if
+FAIL     err_assign_const_field_in_member
+--- tests/err/err_assign_const_field_in_member.expected 2026-10-18 20:52:52.281743403 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.359843359 +0000
+@@ -1 +1 @@
+-compilation error: line 6:9: cannot assign to a const field 'x'
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_assign_to_call_result
+--- tests/err/err_assign_to_call_result.expected        2026-10-18 20:52:52.283776350 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.376670971 +0000
+@@ -1 +1 @@
+-compilation error: line 10:8: expected ':='
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_call_on_int
+--- tests/err/err_call_on_int.expected  2026-10-18 20:52:52.281022638 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.397705487 +0000
+@@ -1 +1 @@
+-compilation error: line 2:7: type 'i32' is not a struct
++compilation error: line 2:9: unexpected '(' after the statement
+FAIL     err_call_on_type
+--- tests/err/err_call_on_type.expected 2026-10-18 20:52:52.270347674 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.418740002 +0000
+@@ -1 +1 @@
+-compilation error: line 9:6: variable 'Point' is used before its declaration
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_dot_after_non_struct
+--- tests/err/err_dot_after_non_struct.expected 2026-10-18 20:52:52.271953828 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.439774517 +0000
+@@ -1 +1 @@
+-compilation error: line 9:12: type 'i32' is not a struct
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_field_after_fn
+--- tests/err/err_field_after_fn.expected       2026-10-18 20:52:52.269283078 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.460809033 +0000
+@@ -1 +1 @@
+-compilation error: line 9:5: field declaration after member function
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_fn_before_first_field
+--- tests/err/err_fn_before_first_field.expected        2026-10-18 20:52:52.270150116 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.473429742 +0000
+@@ -1 +1 @@
+-compilation error: line 3:5: member function before first field
++compilation error: line 3:5: expected a type, got 'fn'
+FAIL     err_member_call_wrong_arg_count
+--- tests/err/err_member_call_wrong_arg_count.expected  2026-10-18 20:52:52.281268673 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.494464257 +0000
+@@ -1 +1 @@
+-compilation error: line 10:8: 'shift' takes 1 argument(s), got 2
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_member_call_wrong_arg_type
+--- tests/err/err_member_call_wrong_arg_type.expected   2026-10-18 20:52:52.281420246 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.515498772 +0000
+@@ -1 +1 @@
+-compilation error: line 10:14: cannot pass argument 1 of 'shift' of type i32 with a value of type bool
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_member_fn_sees_top_level
+--- tests/err/err_member_fn_sees_top_level.expected     2026-10-18 20:52:52.281896339 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.532326385 +0000
+@@ -1 +1 @@
+-compilation error: line 6:14: variable 'top' is used before its declaration
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_member_fn_wrong_exit_type
+--- tests/err/err_member_fn_wrong_exit_type.expected    2026-10-18 20:52:52.281583857 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.549153997 +0000
+@@ -1 +1 @@
+-compilation error: line 6:9: cannot return of type i32 with a value of type bool
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_mutating_call_cycle_const
+--- tests/err/err_mutating_call_cycle_const.expected    2026-10-18 20:52:52.283577747 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.570188512 +0000
+@@ -1 +1 @@
+-compilation error: line 22:8: cannot call mutating member function 'stepA' on a const object
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_mutating_call_on_const
+--- tests/err/err_mutating_call_on_const.expected       2026-10-18 20:52:52.282315709 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.587016125 +0000
+@@ -1 +1 @@
+-compilation error: line 10:8: cannot call mutating member function 'shift' on a const object
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_mutating_call_through_const_field
+--- tests/err/err_mutating_call_through_const_field.expected    2026-10-18 20:52:52.282605299 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.608050640 +0000
+@@ -1 +1 @@
+-compilation error: line 15:14: cannot call mutating member function 'shift' through a const field
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_name_duplicate_member_fn
+--- tests/err/err_name_duplicate_member_fn.expected     2026-10-18 20:52:52.286506230 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.624878252 +0000
+@@ -1 +1 @@
+-compilation error: line 8:8: member function 'calc' is already declared in struct 'Point'
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_name_field_clash_member_fn
+--- tests/err/err_name_field_clash_member_fn.expected   2026-10-18 20:52:52.286351837 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.641705864 +0000
+@@ -1 +1 @@
+-compilation error: line 4:8: 'val' is already declared in struct 'Point'
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_name_print_field
+--- tests/err/err_name_print_field.expected     2026-10-18 20:52:52.285590357 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.662740380 +0000
+@@ -1 +1 @@
+-compilation error: line 3:9: expected a field name
++compilation error: line 3:9: expected a field name, got 'print'
+FAIL     err_name_print_fn
+--- tests/err/err_name_print_fn.expected        2026-10-18 20:52:52.284728324 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.683774895 +0000
+@@ -1 +1 @@
+-compilation error: line 1:4: expected a function name
++compilation error: line 1:4: expected a function name, got 'print'
+FAIL     err_name_print_member_fn
+--- tests/err/err_name_print_member_fn.expected 2026-10-18 20:52:52.285995895 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.700602507 +0000
+@@ -1 +1 @@
+-compilation error: line 4:8: expected a function name
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_name_print_var
+--- tests/err/err_name_print_var.expected       2026-10-18 20:52:52.284100457 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.717430120 +0000
+@@ -1 +1 @@
+-compilation error: line 1:5: expected a variable name
++compilation error: line 1:5: expected a variable name, got 'print'
+FAIL     err_name_read_fn
+--- tests/err/err_name_read_fn.expected 2026-10-18 20:52:52.284493820 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.738464635 +0000
+@@ -1 +1 @@
+-compilation error: line 1:4: expected a function name
++compilation error: line 1:4: expected a function name, got 'read'
+FAIL     err_name_read_param
+--- tests/err/err_name_read_param.expected      2026-10-18 20:52:52.285285034 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.755292247 +0000
+@@ -1 +1 @@
+-compilation error: line 1:16: expected a parameter name
++compilation error: line 1:16: expected a parameter name, got 'read'
+FAIL     err_name_read_var
+--- tests/err/err_name_read_var.expected        2026-10-18 20:52:52.283933657 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.776326763 +0000
+@@ -1 +1 @@
+-compilation error: line 1:5: expected a variable name
++compilation error: line 1:5: expected a variable name, got 'read'
+FAIL     err_name_struct_clash_global_fn
+--- tests/err/err_name_struct_clash_global_fn.expected  2026-10-18 20:52:52.286188152 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.793154375 +0000
+@@ -1 +1 @@
+-compilation error: line 5:4: 'main' is already declared
++compilation error: line 5:1: 'main' is already declared
+FAIL     err_print_no_args
+--- tests/err/err_print_no_args.expected        2026-10-18 20:52:52.272359777 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.814188890 +0000
+@@ -1 +1 @@
+-compilation error: line 1:7: expected an expression or string literal
++compilation error: line 1:1: cannot start a statement with 'print'
+FAIL     err_print_two_args
+--- tests/err/err_print_two_args.expected       2026-10-18 20:52:52.274186024 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.835223406 +0000
+@@ -1 +1 @@
+-compilation error: line 1:8: expected ')'
++compilation error: line 1:1: cannot start a statement with 'print'
+FAIL     err_print_used_as_value
+--- tests/err/err_print_used_as_value.expected  2026-10-18 20:52:52.274501716 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.852051018 +0000
+@@ -1 +1 @@
+-compilation error: line 1:7: expected a constant, variable, or '!'
++compilation error: line 1:7: expected a constant, variable, or '!', got 'print'
+FAIL     err_read_with_args
+--- tests/err/err_read_with_args.expected       2026-10-18 20:52:52.276918616 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.868878630 +0000
+@@ -1 +1 @@
+-compilation error: line 1:12: expected ')'
++compilation error: line 1:7: expected a constant, variable, or '!', got 'read'
+FAIL     err_string_outside_print
+--- tests/err/err_string_outside_print.expected 2026-10-18 20:52:52.275573891 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.889913145 +0000
+@@ -1 +1 @@
+-compilation error: line 1:7: expected a constant, variable, or '!'
++compilation error: line 1:7: unexpected byte '"'
+FAIL     err_string_unclosed
+--- tests/err/err_string_unclosed.expected      2026-10-18 20:52:52.276597571 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.910947661 +0000
+@@ -1 +1 @@
+-compilation error: line 1:7: string literal is not closed on this line
++compilation error: line 1:7: unexpected byte '"'
+FAIL     err_unknown_field
+--- tests/err/err_unknown_field.expected        2026-10-18 20:52:52.280122899 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.927775273 +0000
+@@ -1 +1 @@
+-compilation error: line 6:14: variable 'z' is used before its declaration
++compilation error: line 4:5: expected a type, got 'fn'
+FAIL     err_unknown_member_fn
+--- tests/err/err_unknown_member_fn.expected    2026-10-18 20:52:52.280468663 +0000
++++ /tmp/tmp.GKboTkdE2J/actual  2026-10-18 20:56:52.944602885 +0000
+@@ -1 +1 @@
+-compilation error: line 6:8: struct 'Circle' has no member function 'd2'
++compilation error: line 6:10: unexpected '(' after the statement
+PASS     if_cond-not-bool
+PASS     not_missing-operand
+PASS     not_on-int
+PASS     p3_e01_two_operators
+PASS     p3_e02_operator_at_eol
+PASS     p3_e03_operator_after_brace
+PASS     p3_e04_tokens_after
+PASS     p3_e05_name_no_assign
+PASS     p3_e06_bad_start
+PASS     p3_e07_missing_init
+PASS     p3_e08_exit_operation
+PASS     p3_e09_after_exit
+PASS     p3_e10_no_exit
+PASS     p3_e11_parentheses
+PASS     p3_e12_unclosed_brace
+PASS     p3_e13_use_before_decl
+PASS     p3_e14_assign_const
+PASS     p3_e15_redeclared
+PASS     p4_e01_bool_in_arith
+PASS     p4_e02_narrow_init
+PASS     p4_e03_narrow_assign
+PASS     p4_e04_narrow_expr
+PASS     p4_e05_const_overflow_i64
+PASS     p4_e06_const_overflow_i32
+PASS     p4_e07_bool_vs_int
+PASS     p4_e08_single_equals
+PASS     p4_e10_two_comparisons
+PASS     p4_e11_bool_into_int
+PASS     p4_e12_int_into_bool
+PASS     p4_e13_bool_assign_int
+PASS     p6_e01_unknown_field
+PASS     p6_e02_wrong_init_count
+PASS     p6_e03_write_const_link
+PASS     p6_e04_wrong_arg_count
+PASS     p6_e05_wrong_exit_type
+PASS     p6_e06_fn_after_stmt
+PASS     scope_assign-shadow-type
+PASS     scope_redeclare-in-block
+PASS     scope_use-after-block
+PASS     while_cond-not-bool
+-----------------------------
+passed: 98   failed: 49
+aniia@Yukichi:~/CS400/practices/practice1$"
+
+Prompt 6 (Second Test Suite Execution & Codegen Crash Diagnostics):
+"aniia@Yukichi:~/CS400/practices/practice1$ ./run.sh
+[ 14%] Building CXX object CMakeFiles/compiler.dir/src/codegen.cpp.o
+[ 28%] Building CXX object CMakeFiles/compiler.dir/src/compiler.cpp.o
+[ 42%] Building CXX object CMakeFiles/compiler.dir/src/lexer.cpp.o
+[ 57%] Building CXX object CMakeFiles/compiler.dir/src/main.cpp.o
+[ 71%] Building CXX object CMakeFiles/compiler.dir/src/parser.cpp.o
+[ 85%] Building CXX object CMakeFiles/compiler.dir/src/semantic_checker.cpp.o
+[100%] Linking CXX executable compiler
+[100%] Built target compiler
+PASS     exit_in-arm
+./run.sh: line 25: 204313 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     i32_into_i64_param
+--- tests/ok/i32_into_i64_param.expected        2026-10-18 20:52:52.266920090 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:25.449052325 +0000
+@@ -1 +0,0 @@
+-Program exit with result 25
+PASS     if-else_basic
+PASS     if-else_basic [ast]
+PASS     if-else_nested-merge
+PASS     if-else_nested
+PASS     if-else_nested [ast]
+PASS     if-else_phi
+PASS     if_no-else
+./run.sh: line 25: 204365 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     member_calls_member
+--- tests/ok/member_calls_member.expected       2026-10-18 20:52:52.265690806 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:25.847482964 +0000
+@@ -1 +0,0 @@
+-Program exit with result 50
+FAIL     member_mutual_recursion
+--- tests/ok/member_mutual_recursion.expected   2026-10-18 20:52:52.265997353 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:25.925436784 +0000
+@@ -1,2 +1 @@
+-true
+ Program exit with result 0
+./run.sh: line 25: 204376 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     member_noargs
+--- tests/ok/member_noargs.expected     2026-10-18 20:52:52.265383002 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:25.947090624 +0000
+@@ -1 +0,0 @@
+-Program exit with result 25
+./run.sh: line 25: 204381 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     member_recursion
+--- tests/ok/member_recursion.expected  2026-10-18 20:52:52.265840828 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:25.981736766 +0000
+@@ -1 +0,0 @@
+-Program exit with result 120
+./run.sh: line 25: 204386 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     member_two_args
+--- tests/ok/member_two_args.expected   2026-10-18 20:52:52.265538451 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:26.012052141 +0000
+@@ -1 +0,0 @@
+-Program exit with result 8
+./run.sh: line 25: 204391 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     mutating_chain_mut
+--- tests/ok/mutating_chain_mut.expected        2026-10-18 20:52:52.266738740 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:26.046698283 +0000
+@@ -1 +0,0 @@
+-Program exit with result 26
+PASS     name_torture_printf_valid
+./run.sh: line 25: 204401 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     name_torture_runtime
+--- tests/ok/name_torture_runtime.expected      2026-10-18 20:52:52.267306611 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:26.154967479 +0000
+@@ -1,8 +0,0 @@
+-100
+-10
+-21
+-11
+-16
+-25
+-Box{v: 12}
+-Program exit with result 12
+FAIL     name_torture_runtime [ircheck]
+grep: /tmp/tmp.PkQ8AhiydK/out.ll: No such file or directory
+IR check failed: expected exactly 1 runtime main, found 0
+./run.sh: line 25: 204419 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     name_torture_underscores
+--- tests/ok/name_torture_underscores.expected  2026-10-18 20:52:52.268178242 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:26.219928996 +0000
+@@ -1 +0,0 @@
+-Program exit with result 1013
+PASS     not_bool
+PASS     not_in-condition
+PASS     not_in-condition [ast]
+PASS     not_precedence
+PASS     not_precedence [ast]
+PASS     p3_v01_precedence
+PASS     p3_v01_precedence [ast]
+PASS     p3_v02_star_middle
+PASS     p3_v02_star_middle [ast]
+PASS     p3_v03_minus_chain
+PASS     p3_v03_minus_chain [ast]
+PASS     p3_v04_assign_expr
+PASS     p3_v05_task4
+PASS     p3_v06_practice2
+PASS     p3_v06_practice2 [ast]
+PASS     p3_v07_spacing
+PASS     p3_v08_vars_chain
+PASS     p3_v09_exit_const
+PASS     p4_v01_task1_sum
+PASS     p4_v01_task1_sum [ast]
+PASS     p4_v02_task1_bool_exit
+PASS     p4_v03_i64_widen
+PASS     p4_v04_sext_negative
+PASS     p4_v05_i64_const
+PASS     p4_v06_compare_mixed_width
+PASS     p4_v07_compare_mixed_false
+PASS     p4_v08_bool_compare
+PASS     p4_v09_exit_true_literal
+PASS     p4_v10_assign_widen
+./run.sh: line 25: 204550 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     p6_v01_nested_chain
+--- tests/ok/p6_v01_nested_chain.expected       2026-10-12 12:50:34.021983824 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:27.792342862 +0000
+@@ -1 +0,0 @@
+-Program exit with result 10
+./run.sh: line 25: 204555 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     p6_v02_field_write
+--- tests/ok/p6_v02_field_write.expected        2026-10-12 12:50:34.023237717 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:27.826235028 +0000
+@@ -1 +0,0 @@
+-Program exit with result 42
+FAIL     p6_v03_struct_param
+--- tests/ok/p6_v03_struct_param.expected       2026-10-12 12:50:34.023615892 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:27.860127194 +0000
+@@ -1 +1,3 @@
+-Program exit with result 15
++Function return type does not match operand type of return inst!
++  ret void
++ i32compilation error: internal error: generated IR is invalid
+./run.sh: line 25: 204565 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     p6_v04_struct_result
+--- tests/ok/p6_v04_struct_result.expected      2026-10-12 12:50:34.023788141 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:27.877073277 +0000
+@@ -1 +0,0 @@
+-Program exit with result 9
+PASS     p6_v05_nested_calls
+PASS     p6_v06_i32_to_i64_param
+./run.sh: line 25: 204580 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     p6_v07_nested_init
+--- tests/ok/p6_v07_nested_init.expected        2026-10-12 12:50:34.024404216 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.038061064 +0000
+@@ -1 +0,0 @@
+-Program exit with result 36
+FAIL     print_all_kinds
+--- tests/ok/print_all_kinds.expected   2026-10-18 20:52:52.266311662 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.067716709 +0000
+@@ -1,6 +1 @@
+-100% discount\nno newline
+--9
+-6000000000
+-true
+-false
+-Program exit with result 0
++compilation error: line 1:9: expected a constant, variable, or '!', got '-'
+FAIL     print_nested_struct
+--- tests/ok/print_nested_struct.expected       2026-10-18 20:52:52.266458621 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.131264520 +0000
+@@ -1,4 +1 @@
+-Circle{center: Point{x: 3, y: 4}, radius: 2}
+-Point{x: 1, y: 2}
+-Point{x: 3, y: 4}
+ Program exit with result 0
+./run.sh: line 25: 204596 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     read_in_call_args
+--- tests/ok/read_in_call_args.expected 2026-10-18 20:52:52.267076975 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.152447124 +0000
+@@ -1,2 +0,0 @@
+-35
+-Program exit with result 7
+PASS     regress_p6_fib
+./run.sh: line 25: 204606 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     regress_p6_nested_init
+--- tests/ok/regress_p6_nested_init.expected    2026-10-18 20:52:52.264887248 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.258360142 +0000
+@@ -1 +0,0 @@
+-Program exit with result 36
+./run.sh: line 25: 204611 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     regress_p6_task3
+--- tests/ok/regress_p6_task3.expected  2026-10-18 20:52:52.264483295 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.292252308 +0000
+@@ -1 +0,0 @@
+-Program exit with result 28
+./run.sh: line 25: 204616 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     regress_p7_middle_chain
+--- tests/ok/regress_p7_middle_chain.expected   2026-10-18 20:52:52.264323263 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.326144474 +0000
+@@ -1 +0,0 @@
+-Program exit with result 46
+./run.sh: line 25: 204621 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     regress_p7_task1
+--- tests/ok/regress_p7_task1.expected  2026-10-18 20:52:52.264148681 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.364273160 +0000
+@@ -1 +0,0 @@
+-Program exit with result 83
+./run.sh: line 25: 204626 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     regress_p7_task3
+--- tests/ok/regress_p7_task3.expected  2026-10-18 20:52:52.265154665 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.398165326 +0000
+@@ -1,7 +0,0 @@
+-p and c:
+-Point{x: 3, y: 4}
+-Circle{center: Point{x: 3, y: 4}, radius: 2}
+-7
+-6000000000
+-true
+-Program exit with result 2
+PASS     scope_shadow-type
+./run.sh: line 25: 204636 Segmentation fault      (core dumped) ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+FAIL     shadow_param_local
+--- tests/ok/shadow_param_local.expected        2026-10-18 20:52:52.266148494 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.495605303 +0000
+@@ -1 +0,0 @@
+-Program exit with result 26
+PASS     while_exit-in-body
+PASS     while_sum
+PASS     while_sum [ast]
+PASS     block_brace-missing
+PASS     block_brace-on-if-line
+PASS     block_empty
+PASS     block_never-closed
+PASS     block_statement-after-exit
+PASS     else_without-if
+PASS     err_assign_const_field_in_member
+FAIL     err_assign_to_call_result
+--- tests/err/err_assign_to_call_result.expected        2026-10-18 20:52:52.283776350 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.787925233 +0000
+@@ -1 +1 @@
+-compilation error: line 10:8: expected ':='
++compilation error: line 11:8: expected ':=' after 'p', got '('
+PASS     err_call_on_int
+PASS     err_call_on_type
+FAIL     err_dot_after_non_struct
+--- tests/err/err_dot_after_non_struct.expected 2026-10-18 20:52:52.271953828 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.838763482 +0000
+@@ -1 +1 @@
+-compilation error: line 9:12: type 'i32' is not a struct
++compilation error: line 10:12: type 'i32' is not a struct
+FAIL     err_field_after_fn
+--- tests/err/err_field_after_fn.expected       2026-10-18 20:52:52.269283078 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.859946085 +0000
+@@ -1 +1 @@
+-compilation error: line 9:5: field declaration after member function
++compilation error: line 8:5: field declaration after member function
+PASS     err_fn_before_first_field
+FAIL     err_member_call_wrong_arg_count
+--- tests/err/err_member_call_wrong_arg_count.expected  2026-10-18 20:52:52.281268673 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.898074772 +0000
+@@ -1 +1 @@
+-compilation error: line 10:8: 'shift' takes 1 argument(s), got 2
++compilation error: line 10:7: 'shift' takes 1 argument(s), got 2
+PASS     err_member_call_wrong_arg_type
+PASS     err_member_fn_sees_top_level
+PASS     err_member_fn_wrong_exit_type
+FAIL     err_mutating_call_cycle_const
+--- tests/err/err_mutating_call_cycle_const.expected    2026-10-18 20:52:52.283577747 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.965859103 +0000
+@@ -1 +1 @@
+-compilation error: line 22:8: cannot call mutating member function 'stepA' on a const object
++compilation error: line 21:7: cannot call mutating member function 'stepA' on a const object
+FAIL     err_mutating_call_on_const
+--- tests/err/err_mutating_call_on_const.expected       2026-10-18 20:52:52.282315709 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.978568666 +0000
+@@ -1 +1 @@
+-compilation error: line 10:8: cannot call mutating member function 'shift' on a const object
++compilation error: line 11:7: cannot call mutating member function 'shift' on a const object
+FAIL     err_mutating_call_through_const_field
+--- tests/err/err_mutating_call_through_const_field.expected    2026-10-18 20:52:52.282605299 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:28.999751269 +0000
+@@ -1 +1 @@
+-compilation error: line 15:14: cannot call mutating member function 'shift' through a const field
++compilation error: line 17:14: cannot call mutating member function 'shift' through a const field
+FAIL     err_name_duplicate_member_fn
+--- tests/err/err_name_duplicate_member_fn.expected     2026-10-18 20:52:52.286506230 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.020933873 +0000
+@@ -1 +1 @@
+-compilation error: line 8:8: member function 'calc' is already declared in struct 'Point'
++compilation error: line 8:5: member function 'calc' is already declared in struct 'Point'
+FAIL     err_name_field_clash_member_fn
+--- tests/err/err_name_field_clash_member_fn.expected   2026-10-18 20:52:52.286351837 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.042116477 +0000
+@@ -1 +1 @@
+-compilation error: line 4:8: 'val' is already declared in struct 'Point'
++compilation error: line 4:5: 'val' is already declared in struct 'Point'
+FAIL     err_name_print_field
+--- tests/err/err_name_print_field.expected     2026-10-18 20:52:52.285590357 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.059062559 +0000
+@@ -1 +1 @@
+-compilation error: line 3:9: expected a field name
++compilation error: line 3:9: expected a field name, got 'print'
+FAIL     err_name_print_fn
+--- tests/err/err_name_print_fn.expected        2026-10-18 20:52:52.284728324 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.080245163 +0000
+@@ -1 +1 @@
+-compilation error: line 1:4: expected a function name
++compilation error: line 1:4: expected a function name, got 'print'
+FAIL     err_name_print_member_fn
+--- tests/err/err_name_print_member_fn.expected 2026-10-18 20:52:52.285995895 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.097191246 +0000
+@@ -1 +1 @@
+-compilation error: line 4:8: expected a function name
++compilation error: line 4:8: expected a function name, got 'print'
+FAIL     err_name_print_var
+--- tests/err/err_name_print_var.expected       2026-10-18 20:52:52.284100457 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.114137329 +0000
+@@ -1 +1 @@
+-compilation error: line 1:5: expected a variable name
++compilation error: line 1:5: expected a variable name, got 'print'
+FAIL     err_name_read_fn
+--- tests/err/err_name_read_fn.expected 2026-10-18 20:52:52.284493820 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.135319933 +0000
+@@ -1 +1 @@
+-compilation error: line 1:4: expected a function name
++compilation error: line 1:4: expected a function name, got 'read'
+FAIL     err_name_read_param
+--- tests/err/err_name_read_param.expected      2026-10-18 20:52:52.285285034 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.156502536 +0000
+@@ -1 +1 @@
+-compilation error: line 1:16: expected a parameter name
++compilation error: line 1:16: expected a parameter name, got 'read'
+FAIL     err_name_read_var
+--- tests/err/err_name_read_var.expected        2026-10-18 20:52:52.283933657 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.173448619 +0000
+@@ -1 +1 @@
+-compilation error: line 1:5: expected a variable name
++compilation error: line 1:5: expected a variable name, got 'read'
+FAIL     err_name_struct_clash_global_fn
+--- tests/err/err_name_struct_clash_global_fn.expected  2026-10-18 20:52:52.286188152 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.190394702 +0000
+@@ -1 +1 @@
+-compilation error: line 5:4: 'main' is already declared
++compilation error: line 5:1: 'main' is already declared
+PASS     err_print_no_args
+FAIL     err_print_two_args
+--- tests/err/err_print_two_args.expected       2026-10-18 20:52:52.274186024 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.224286868 +0000
+@@ -1 +1 @@
+-compilation error: line 1:8: expected ')'
++compilation error: line 1:8: expected ')', got ','
+FAIL     err_print_used_as_value
+--- tests/err/err_print_used_as_value.expected  2026-10-18 20:52:52.274501716 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.245469471 +0000
+@@ -1 +1 @@
+-compilation error: line 1:7: expected a constant, variable, or '!'
++compilation error: line 1:7: expected a constant, variable, or '!', got 'print'
+FAIL     err_read_with_args
+--- tests/err/err_read_with_args.expected       2026-10-18 20:52:52.276918616 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.262415554 +0000
+@@ -1 +1 @@
+-compilation error: line 1:12: expected ')'
++compilation error: line 1:12: expected ')', got '5'
+FAIL     err_string_outside_print
+--- tests/err/err_string_outside_print.expected 2026-10-18 20:52:52.275573891 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.283598158 +0000
+@@ -1 +1 @@
+-compilation error: line 1:7: expected a constant, variable, or '!'
++compilation error: line 1:7: expected a constant, variable, or '!', got '"hello"'
+PASS     err_string_unclosed
+PASS     err_unknown_field
+FAIL     err_unknown_member_fn
+--- tests/err/err_unknown_member_fn.expected    2026-10-18 20:52:52.280468663 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.334436407 +0000
+@@ -1 +1 @@
+-compilation error: line 6:8: struct 'Circle' has no member function 'd2'
++compilation error: line 6:7: struct 'Circle' has no member function 'd2'
+PASS     if_cond-not-bool
+PASS     not_missing-operand
+PASS     not_on-int
+PASS     p3_e01_two_operators
+PASS     p3_e02_operator_at_eol
+PASS     p3_e03_operator_after_brace
+PASS     p3_e04_tokens_after
+PASS     p3_e05_name_no_assign
+PASS     p3_e06_bad_start
+PASS     p3_e07_missing_init
+PASS     p3_e08_exit_operation
+PASS     p3_e09_after_exit
+PASS     p3_e10_no_exit
+PASS     p3_e11_parentheses
+PASS     p3_e12_unclosed_brace
+PASS     p3_e13_use_before_decl
+PASS     p3_e14_assign_const
+PASS     p3_e15_redeclared
+PASS     p4_e01_bool_in_arith
+PASS     p4_e02_narrow_init
+PASS     p4_e03_narrow_assign
+PASS     p4_e04_narrow_expr
+PASS     p4_e05_const_overflow_i64
+PASS     p4_e06_const_overflow_i32
+PASS     p4_e07_bool_vs_int
+PASS     p4_e08_single_equals
+PASS     p4_e10_two_comparisons
+PASS     p4_e11_bool_into_int
+PASS     p4_e12_int_into_bool
+PASS     p4_e13_bool_assign_int
+FAIL     p6_e01_unknown_field
+--- tests/err/p6_e01_unknown_field.expected     2026-10-12 12:50:34.031182618 +0000
++++ /tmp/tmp.PkQ8AhiydK/actual  2026-10-18 21:11:29.838582373 +0000
+@@ -1 +1 @@
+-compilation error: line 7:6: struct 'Point' has no field 'z'
++compilation error: line 7:7: struct 'Point' has no field 'z'
+PASS     p6_e02_wrong_init_count
+PASS     p6_e03_write_const_link
+PASS     p6_e04_wrong_arg_count
+PASS     p6_e05_wrong_exit_type
+PASS     p6_e06_fn_after_stmt
+PASS     scope_assign-shadow-type
+PASS     scope_redeclare-in-block
+PASS     scope_use-after-block
+PASS     while_cond-not-bool
+-----------------------------
+passed: 100   failed: 47
+
+fix the code or the tests but do not forget to follow the requirements of the practice 7"
+
+Prompt 7 (Architecture & AST Refactoring Critique):
+"fix FunctionCallNode
+it doesn't need a sepearte pointer for the case of memeber functions because MemberFnDeclNode is child class of regular function declaration
+MemberFnDeclNode* member_fn = nullptr;
+
+also
+what are theeese doing in the asmt node
+bool                     is_field_of_this = false;
+    int                      this_field_index = -1;
+
+same thing about this in varnamenode
+
+    bool      is_field_of_this = false;
+    int       this_field_index = -1
+
+they should be the type that belongs to something that tells them they are in fact a part of struct
+or there should be a separate polymorphic class
+scrap all the context why this implemetation was used for me to figure out a decent refactor
+
+also fix the code to use the recursive aproach both for fields access in struct and member function call in struct
+i deleted the StructFieldAccessNode
+make sure the chained member function calls and fields accesses are allowed
+
+before refactor make an implemenation plan and gather the info i asked"
+
+Prompt 8 (Architecture & AST Refactoring Critique - Duplicate/Followup):
+"fix FunctionCallNode
+it doesn't need a sepearte pointer for the case of memeber functions because MemberFnDeclNode is child class of regular function declaration
+MemberFnDeclNode* member_fn = nullptr;
+
+also
+what are theeese doing in the asmt node
+bool                     is_field_of_this = false;
+    int                      this_field_index = -1;
+
+same thing about this in varnamenode
+
+    bool      is_field_of_this = false;
+    int       this_field_index = -1
+
+they should be the type that belongs to something that tells them they are in fact a part of struct
+or there should be a separate polymorphic class
+scrap all the context why this implemetation was used for me to figure out a decent refactor
+
+also fix the code to use the recursive aproach both for fields access in struct and member function call in struct
+i deleted the StructFieldAccessNode
+make sure the chained member function calls and fields accesses are allowed
+
+before refactor make an implemenation plan and gather the info i asked"
+
+Prompt 9 (Refactor Plan Approval - Option B Selected):
+"implement
+[Artifact comment on refactor_plan.md: implement option B]"
+
+Prompt 10 (Refactor Implementation Continuation):
+"continue"
+
+Prompt 11 (Practice 7 PDF Verification & AI Usage Report Generation):
+"okay now look into the w07-practice.pdf and 2 two things
+double check if anything was done against or forgotten according to practice requirements
+provide a full log of this ai interaction in ai_usage.txt file
+do not cut short any exachnages do not remove the old ones
+simply append"
+
+Prompt 12 (Execution Continuation):
+"continue"
+
+3. CODE ACCEPTED AS-IS
+----------------------
+- Lexer Extensions for Practice 7:
+  * String literal tokenization state (`StringState` in `src/states/string_state.h`) reading raw unescaped characters up to newline/quote.
+  * Registered keywords `read` and `print` in `src/keywords.h` and token kind constants.
+- AST Modular Node Additions & Refactorings (`src/nodes/`):
+  * `MemberFnDeclNode` inheriting from `FunctionDeclNode` in `src/nodes/member_fn_decl_node.h`.
+  * `MemberCallNode` inheriting from `ValueNode` in `src/nodes/member_fn_call_node.h`.
+  * `FieldAccessNode` inheriting from `ValueNode` in `src/nodes/field_access_node.h` with recursive `chain_string()` for chained AST dumps.
+  * `ThisNode` (`src/nodes/this_node.h`) representing the implicit receiver `this` in member functions.
+  * `ReadNode` (`src/nodes/read_node.h`) and `PrintNode` (`src/nodes/print_node.h`).
+  * Visitor pattern integration in `src/visitor.h` for all new AST node types.
+- Parser Extensions (`src/parser.h`, `src/parser.cpp`):
+  * Parsing member functions inside struct declarations strictly after field declarations.
+  * Enforcing grammar restrictions: field after member function is rejected; member function before first field is rejected.
+  * Recursive chain parsing for expressions (`ident { '.' ident | '.' ident '(' args ')' }`).
+  * Disallowing bare member function or global function calls as standalone statements.
+  * Parsing `read()` factor and `print(...)` statement.
+- Semantic Checker Pass (`src/semantic_checker.h`, `src/semantic_checker.cpp`):
+  * Symbol resolution hierarchy: parameter/local variables shadow struct fields; member functions shadow global functions.
+  * Invisibility of top-level variables inside function and member function bodies.
+  * Synthesizing `ThisNode` in member function bodies when bare field names are accessed or assigned.
+  * Reserved keyword checks disallowing `read` and `print` as variable, parameter, function, struct, or member names.
+  * Fixed-point iterative mutation analysis: identifying functions that directly mutate fields or indirectly call mutating member functions across recursive call graphs.
+  * Const link rule enforcement: verifying that every object and intermediate field in a mutating call chain is declared `mut`.
+  * Validating argument counts, argument types, return types, and disallowing assignments to temporary call results or const fields.
+- Code Generator Pass (`src/codegen.h`, `src/codegen.cpp` using `llvm::IRBuilder`):
+  * Member function IR naming convention: `@<Struct>_<fn>` (`@Point_shift`, `@Point_d2`, `@Circle_area2`) with collision handling for struct names containing underscores.
+  * Member function ABI: first parameter is a pointer (`ptr %0`) representing `this`.
+  * Memory addressing via `get_expr_address`: returning `current_this_ptr` for `ThisNode`, alloca for `VarNameNode`, and `CreateStructGEP` for `FieldAccessNode`.
+  * Member field assignment (`x := x + dx`): lowering to GEP on `this`, load, add, GEP on `this`, store.
+  * Middle-of-chain calls: lowering field accesses on call results via `CreateExtractValue`; passing call results to member function calls via temporary stack `alloca` and `CreateStore`.
+  * Built-in `read()`: allocating input slot in entry block, invoking `@scanf("%d", ...)` and loading result.
+  * Built-in `print(...)`: single module declaration of `@printf`; printing `i32`, `i64`, `bool` (`true`/`false` via select), string literals, and recursive struct emission (`emit_print_struct`) traversing field tables with uniform format strings and a final newline.
+- Test Suite Harness (`run.sh` and `tests/`):
+  * Full integration of 66+ new Practice 7 tests (valid programs and error programs).
+  * Support for `.in` input feeding via standard input to `lli`.
+  * IR validation runner (`.ircheck`) asserting unique IR function definitions, no user redefinition of runtime symbols (`main`, `printf`, `scanf`), and module verification.
+
+4. CODE MODIFIED OR WRITTEN MANUALLY
+-----------------------------------
+- Architectural AST Refactoring (Eliminating Ad-Hoc Struct State):
+  * Removed ad-hoc `bool is_field_of_this` and `int this_field_index` from `AsmtNode` and `VarNameNode`.
+  * Refactored `AsmtNode` to use general `std::unique_ptr<ExprNode> lhs` and `rhs`.
+  * Introduced `ThisNode` (`src/nodes/this_node.h`) as a first-class AST expression node.
+  * Removed `StructFieldAccessNode* member_fn` from `FunctionCallNode` since `MemberFnDeclNode` is a derived subclass of `FunctionDeclNode`.
+  * Transitioned all field accesses and chained member calls to a recursive tree representation (`FieldAccessNode` and `MemberCallNode`).
+- Spec Alignment with w07-practice.pdf:
+  * Corrected `FieldDeclNode::dump` to output `Member <name> <type> <mut/const>` matching the AST dump specification on page 2.
+  * Verified `@Point_shift` in `output.ll` has `ptr` as first parameter, and `x := x + dx` emits GEP, load, add, and store.
+  * Verified middle-of-chain call handling (`c.grown(1).center.d2()`, `origin().moved(7).x`), using `extractvalue` on call results.
+  * Verified all error positions and hand-calculated outputs across 147 test cases.
+- Build & Regression Validation:
+  * Built compiler using CMake in WSL environment.
+  * Executed comprehensive test harness (`./run.sh`), achieving 147/147 tests passing (100% pass rate).
+
+AND ANOTHER WEB AI CHAT LINK:
+used ai to discuss implementation architecture ideas and make a prompt for agi
+https://claude.ai/share/b71c2cfa-c6fd-42dc-83cc-add1106c82c3

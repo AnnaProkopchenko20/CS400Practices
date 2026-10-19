@@ -25,10 +25,11 @@ file(GLOB_RECURSE SOURCES "src/*.cpp")
 
 add_executable(compiler ${SOURCES}
         src/states/minus_state.h
+        src/states/string_state.h
+        src/nodes/this_node.h
         src/nodes/fn_call_node.h
         src/nodes/fn_decl_node.h
         src/nodes/struct_decl_node.h
-        src/nodes/struct_field_access_node.h
         src/nodes/field_decl_node.h
         src/nodes/fn_param_node.h
         src/nodes/init_node.h

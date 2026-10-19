@@ -1,0 +1,10 @@
+struct Point
+{
+    fn d2 := () -> i32
+    {
+        exit 0
+    }
+    i32 x
+}
+Point p{1}
+exit p.x

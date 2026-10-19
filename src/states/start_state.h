@@ -50,6 +50,7 @@ public:
         if (b == '-') { ctx.markStart(); ctx.changeState(StateId::MinusState); return true; }
         if (b == '=') { ctx.markStart(); ctx.changeState(StateId::Equals);   return true; }
         if (b == '!') { ctx.markStart(); ctx.changeState(StateId::Negation); return true; }
+        if (b == '"') { ctx.markStart(); ctx.changeState(StateId::String);   return true; }
 
         if (b > 127)
             ctx.fail("unexpected byte", ctx.line, ctx.col);

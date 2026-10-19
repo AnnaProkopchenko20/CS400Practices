@@ -13,7 +13,7 @@ struct FieldDeclNode : Node {
 
     void dump(int d) const override {
         indent(d);
-        std::cout << "Field " << name << " " << type_name << (is_mut ? " mut" : " const") << "\n";
+        std::cout << "Member " << name << " " << type_name << (is_mut ? " mut" : " const") << "\n";
     }
 
     llvm::Value* accept(Visitor&) override { return nullptr; }

@@ -1,0 +1,28 @@
+#!/bin/bash
+set -e
+ll="$1"
+# Extract function names from define lines
+fns=$(grep "^define " "$ll" | sed 's/define [^(]*@\([^(]*\)(.*/\1/')
+
+# Assert unique defined names
+dup=$(echo "$fns" | sort | uniq -d)
+if [ -n "$dup" ]; then
+    echo "IR check failed: duplicate function definitions: $dup"
+    exit 1
+fi
+
+# Assert main is defined only once (the runtime entry point)
+main_count=$(echo "$fns" | grep -w "^main$" | wc -l)
+if [ "$main_count" -ne 1 ]; then
+    echo "IR check failed: expected exactly 1 runtime main, found $main_count"
+    exit 1
+fi
+
+# Assert printf and scanf are not defined (only declared)
+if echo "$fns" | grep -E -w "^(printf|scanf)$" > /dev/null; then
+    echo "IR check failed: runtime printf/scanf was defined instead of declared"
+    exit 1
+fi
+
+# Module verification via llvm-as
+llvm-as "$ll" -o /dev/null

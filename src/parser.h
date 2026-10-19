@@ -40,22 +40,28 @@ private:
     Token expect(const std::string& kind, const std::string& text, const std::string& what);
     void end_of_line();
 
-    std::unique_ptr<StmtNode>  parse_statement();
-    std::unique_ptr<StmtNode>  parse_decl();
-    std::unique_ptr<StmtNode>  parse_assign();
-    std::unique_ptr<ExitNode>  parse_exit();
-    std::unique_ptr<IfNode>    parse_if();
-    std::unique_ptr<WhileNode> parse_while();
-    std::unique_ptr<BlockNode> parse_block(const std::string& after);
-    std::unique_ptr<ExprNode>  parse_expr();
-    std::unique_ptr<ExprNode>  parse_arith();
-    std::unique_ptr<ExprNode>  parse_term();
-    std::unique_ptr<ExprNode>  parse_factor();
+    std::unique_ptr<StmtNode>         parse_statement();
+    std::unique_ptr<StmtNode>         parse_decl();
+    std::unique_ptr<StmtNode>         parse_assign();
+    std::unique_ptr<StmtNode>         parse_print();
+    std::unique_ptr<ExitNode>         parse_exit();
+    std::unique_ptr<IfNode>           parse_if();
+    std::unique_ptr<WhileNode>        parse_while();
+    std::unique_ptr<BlockNode>        parse_block(const std::string& after);
+    std::unique_ptr<ExprNode>         parse_expr();
+    std::unique_ptr<ExprNode>         parse_arith();
+    std::unique_ptr<ExprNode>         parse_term();
+    std::unique_ptr<ExprNode>         parse_factor();
+    std::unique_ptr<ExprNode>         parse_read();
+    std::unique_ptr<ExprNode>         parse_identifier_chain();
+    std::unique_ptr<ExprNode>         parse_member_call(std::unique_ptr<ExprNode> left, const Token& name, const Token& dot_tok);
+    std::unique_ptr<ExprNode>         parse_field_access(std::unique_ptr<ExprNode> left, const Token& name, const Token& dot_tok);
     std::unique_ptr<StructDeclNode>   parse_struct_decl();
     std::unique_ptr<FieldDeclNode>    parse_field_decl();
     std::unique_ptr<FunctionDeclNode> parse_fn_decl();
+    std::unique_ptr<MemberFnDeclNode> parse_member_fn();
+    std::vector<std::unique_ptr<FuncParamNode>> parse_params();
+    std::vector<std::unique_ptr<ExprNode>>      parse_args();
     std::unique_ptr<FuncParamNode>    parse_param();
     std::unique_ptr<InitNode>         parse_init();
-
-
 };
