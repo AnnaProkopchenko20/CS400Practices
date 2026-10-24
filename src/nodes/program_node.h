@@ -32,7 +32,10 @@ struct ProgramNode : Node {
 
     void dump(int d) const override {
         indent(d); std::cout << "Program\n";
-        for (auto& st : structs)   { st->dump(d + 1); }
+        for (auto& st : structs)   {
+            if (st->name.rfind("lambda.", 0) == 0) continue;
+            st->dump(d + 1);
+        }
         for (auto& fn : functions) { fn->dump(d + 1); }
         for (auto& s : stmts)      { s->dump(d + 1); }
         exit_stmt->dump(d + 1);

@@ -86,7 +86,73 @@ void SemanticChecker::maybe_rewrite_field(std::unique_ptr<ExprNode>& slot)
 void SemanticChecker::check_expr(std::unique_ptr<ExprNode>& slot)
 {
     maybe_rewrite_field(slot);
+    maybe_rewrite_callable_call(slot);
     slot->accept(*this);
+}
+
+// If slot is a FunctionCallNode whose name resolves to a local variable,
+// rewrite it to a MemberCallNode (callable-object sugar).
+void SemanticChecker::maybe_rewrite_callable_call(std::unique_ptr<ExprNode>& slot)
+{
+    auto* fc = dynamic_cast<FunctionCallNode*>(slot.get());
+    if (!fc) return;
+
+    // Check whether the name is a visible variable
+    auto var_res = lookup_name(fc->name);
+    bool is_var = (var_res.kind != LookupResult::NotFound);
+
+    // Check whether the name is also a function
+    bool is_fn = functions.count(fc->name) != 0;
+    bool is_mem = current_struct_info && current_struct_info->member_fns.count(fc->name);
+
+    if (is_var && (is_fn || is_mem))
+        fail(*fc, "'" + fc->name + "' is both a variable and a function: rename one of them");
+
+    if (!is_var) return; // ordinary function call — handled by visit_fn_call
+
+    // Rewrite: name(args...) -> name.call(args...)
+    auto obj_node = make_unique<VarNameNode>(fc->line, fc->col, fc->name);
+    auto mc = make_unique<MemberCallNode>(fc->line, fc->col,
+                                          std::move(obj_node), "call",
+                                          std::move(fc->args));
+    mc->is_callable_sugar = true;
+    mc->callable_name     = fc->name;
+    slot = std::move(mc);
+}
+
+// Reject a lambda-typed value at a use site where lambdas are not allowed.
+void SemanticChecker::reject_lambda_value(const ExprNode& expr, const std::string& role)
+{
+    if (expr.type.empty()) return;
+    auto it = structs.find(expr.type);
+    if (it == structs.end() || !it->second.is_lambda) return;
+    // Find the variable name for a better error message
+    if (auto* v = dynamic_cast<const VarNameNode*>(&expr))
+        fail(expr, "'" + v->name + "' is a lambda and cannot be " + role +
+             ": its type has no name, so no parameter can have it");
+    // For field access etc., give a simpler message
+    fail(expr, "a lambda value cannot be " + role +
+         ": its type has no name, so no parameter can have it");
+}
+
+// Emit a nice error when a name is used inside a lambda body but not captured.
+void SemanticChecker::fail_unknown_name(const Node& at, const std::string& name)
+{
+    if (!lambda_hints.empty())
+    {
+        const auto& h = lambda_hints.back();
+        // Check if the name is visible in the outer scopes
+        for (auto it = h.outer_scopes.rbegin(); it != h.outer_scopes.rend(); ++it)
+            if (it->count(name)) {
+                fail(at, "'" + name + "' is not captured by lambda '" + h.name +
+                     "': add it to the capture list, [" + name + "]");
+            }
+        // Check if it is a field of the outer struct
+        if (h.outer_struct && h.outer_struct->field_index.count(name))
+            fail(at, "'" + name + "' is not captured by lambda '" + h.name +
+                 "': add it to the capture list, [" + name + "]");
+    }
+    fail(at, "variable '" + name + "' is used before its declaration");
 }
 
 bool SemanticChecker::is_rooted_at_this(const ExprNode& expr)
@@ -188,7 +254,10 @@ void SemanticChecker::validate_lvalue(ExprNode& expr, const Node& at)
             const auto& finfo = it->second.fields[leaf->field_index];
             if (!finfo.is_mut)
             {
-                if (is_bare_this_field)
+                auto st_it = structs.find(leaf->object->type);
+                if (is_bare_this_field && st_it != structs.end() && st_it->second.is_lambda)
+                    fail(at, "cannot assign to '" + finfo.name + "': the capture '" + finfo.name + "' is const, write [mut " + finfo.name + "]");
+                else if (is_bare_this_field)
                     fail(at, "cannot assign to a const field '" + finfo.name + "'");
                 else
                     fail(at, "cannot write through const field '" + finfo.name + "'");
@@ -295,6 +364,7 @@ llvm::Value* SemanticChecker::visit_struct_decl(StructDeclNode& n)
 llvm::Value* SemanticChecker::visit_fn_decl(FunctionDeclNode& n)
 {
     check_new_name(n, n.name);
+    FunctionDeclNode* prev_fn = current_fn;
     current_fn = &n;
 
     scopes.emplace_back();
@@ -311,12 +381,13 @@ llvm::Value* SemanticChecker::visit_fn_decl(FunctionDeclNode& n)
     n.body->accept(*this);
     scopes.pop_back();
 
-    current_fn = nullptr;
+    current_fn = prev_fn;
     return nullptr;
 }
 
 llvm::Value* SemanticChecker::visit_member_fn_decl(MemberFnDeclNode& n)
 {
+    MemberFnDeclNode* prev_mem = current_member_fn;
     current_member_fn = &n;
 
     scopes.emplace_back();
@@ -333,7 +404,7 @@ llvm::Value* SemanticChecker::visit_member_fn_decl(MemberFnDeclNode& n)
     n.body->accept(*this);
     scopes.pop_back();
 
-    current_member_fn = nullptr;
+    current_member_fn = prev_mem;
     return nullptr;
 }
 
@@ -458,10 +529,15 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
     {
         if (call.target->mutates)
         {
-            if (call.has_const_field_link)
-                fail(*call.at, "cannot call mutating member function '" + call.target->name + "' through a const field");
-            if (!call.chain_is_mut)
-                fail(*call.at, "cannot call mutating member function '" + call.target->name + "' on a const object");
+            if (call.is_sugar) {
+                if (!call.chain_is_mut)
+                    fail(*call.at, "cannot call '" + call.display_name + "': its 'call' changes it, and it is not mut");
+            } else {
+                if (call.has_const_field_link)
+                    fail(*call.at, "cannot call mutating member function '" + call.target->name + "' through a const field");
+                if (!call.chain_is_mut)
+                    fail(*call.at, "cannot call mutating member function '" + call.target->name + "' on a const object");
+            }
         }
     }
 
@@ -473,10 +549,17 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
     scopes.emplace_back();
     for (auto& s : n.stmts) s->accept(*this);
     check_expr(n.exit_stmt->expr);
+    reject_lambda_value(*n.exit_stmt->expr, "returned");
     if (current_fn)
     {
         check_assignable(*n.exit_stmt->expr, current_fn->return_type, *n.exit_stmt, "return");
     }
+
+    // Append generated lambda structs so codegen sees them
+    for (auto& gs : generated_structs)
+        n.structs.push_back(std::move(gs));
+    generated_structs.clear();
+
     return nullptr;
 }
 
@@ -508,6 +591,8 @@ llvm::Value* SemanticChecker::visit_decl(DeclNode& n)
             fail(*inner_init, "nested initializer for built-in type '" + n.type_name + "'");
 
         check_expr(n.expr->items[0]);
+        if (!n.is_closure_init)
+            reject_lambda_value(*n.expr->items[0], "used to initialise '" + n.name + "'");
         check_assignable(*n.expr->items[0], n.type_name, n, "initialise '" + n.name + "'");
         n.expr->type = n.expr->items[0]->type;
     }
@@ -517,6 +602,8 @@ llvm::Value* SemanticChecker::visit_decl(DeclNode& n)
         if (n.expr->items.size() == 1)
         {
             check_expr(n.expr->items[0]);
+            if (!n.is_closure_init)
+                reject_lambda_value(*n.expr->items[0], "used to initialise '" + n.name + "'");
             if (n.expr->items[0]->type == n.type_name)
             {
                 n.expr->type = n.type_name;
@@ -551,6 +638,7 @@ llvm::Value* SemanticChecker::visit_asmt(AsmtNode& n)
     validate_lvalue(*n.lhs, n);
 
     check_expr(n.rhs);
+    reject_lambda_value(*n.rhs, "assigned");
 
     std::string what = "assign to '" + lhs_chain_string(n.lhs.get()) + "'";
     if (auto* fa = dynamic_cast<FieldAccessNode*>(n.lhs.get()))
@@ -565,6 +653,7 @@ llvm::Value* SemanticChecker::visit_asmt(AsmtNode& n)
 llvm::Value* SemanticChecker::visit_exit(ExitNode& n)
 {
     check_expr(n.expr);
+    reject_lambda_value(*n.expr, "returned");
     if (current_fn)
     {
         check_assignable(*n.expr, current_fn->return_type, n, "return");
@@ -612,7 +701,7 @@ llvm::Value* SemanticChecker::visit_var(VarNameNode& n)
 {
     auto res = lookup_name(n.name);
     if (res.kind == LookupResult::NotFound)
-        fail(n, "variable '" + n.name + "' is used before its declaration");
+        fail_unknown_name(n, n.name);
     if (res.kind == LookupResult::FieldOfThis)
         fail(n, "internal: VarNameNode for field should have been rewritten");
 
@@ -654,6 +743,11 @@ llvm::Value* SemanticChecker::visit_binop(BinaryOpNode& n)
 
 llvm::Value* SemanticChecker::visit_fn_call(FunctionCallNode& n)
 {
+    //lookup_name() then lookup or in other words get the declaration of this variable with function name if it exsits
+    // if it exists check if the struct of this type has member function call
+    // if it does then swap it to name.call()
+    // and then visit the structs memeber function call()
+
     if (current_struct_info)
     {
         auto mit = current_struct_info->member_fns.find(n.name);
@@ -682,7 +776,7 @@ llvm::Value* SemanticChecker::visit_fn_call(FunctionCallNode& n)
             if (in_member_body_pass)
             {
                 call_edges[current_member_fn].insert(m);
-                deferred_calls.push_back({&n, m, true, false});
+                deferred_calls.push_back({&n, m, true, false, false, n.name});
             }
             return nullptr;
         }
@@ -702,6 +796,7 @@ llvm::Value* SemanticChecker::visit_fn_call(FunctionCallNode& n)
     for (size_t i = 0; i < n.args.size(); ++i)
     {
         check_expr(n.args[i]);
+        reject_lambda_value(*n.args[i], "passed to '" + n.name + "'");
         const auto& want = f->params[i]->type_name;
         const auto& have = n.args[i]->type;
         if (have != want && !(have == "i32" && want == "i64"))
@@ -722,6 +817,8 @@ llvm::Value* SemanticChecker::visit_field_access(FieldAccessNode& n)
     auto it = structs.find(cur_type);
     if (it == structs.end())
         fail(n, "type '" + cur_type + "' is not a struct");
+    if (it->second.is_lambda && !dynamic_cast<ThisNode*>(n.object.get()))
+        fail(n, "'" + n.field_name + "' is a capture of a lambda and is not visible outside its body");
 
     const auto& sinfo = it->second;
     auto f_it = sinfo.field_index.find(n.field_name);
@@ -739,29 +836,65 @@ llvm::Value* SemanticChecker::visit_member_call(MemberCallNode& n)
     const auto& cur_type = n.object->type;
     auto it = structs.find(cur_type);
     if (it == structs.end())
+    {
+        if (n.is_callable_sugar)
+            fail(n, "'" + n.callable_name + "' is not callable: it is " + cur_type);
         fail(n, "type '" + cur_type + "' is not a struct");
+    }
+
+    if (!n.is_callable_sugar)
+    {
+        bool has_field = it->second.field_index.count(n.fn_name) != 0;
+        bool has_mfn   = it->second.member_fns.count(n.fn_name) != 0;
+        if (has_field && has_mfn)
+            fail(n, "'" + n.fn_name + "' is both a variable and a function: rename one of them");
+
+        if (has_field)
+        {
+            int idx = it->second.field_index.at(n.fn_name);
+            auto fa = make_unique<FieldAccessNode>(n.line, n.col, std::move(n.object), n.fn_name);
+            fa->field_index = idx;
+            fa->type = it->second.fields[idx].type;
+            n.object = std::move(fa);
+            n.is_callable_sugar = true;
+            n.callable_name = n.fn_name;
+            n.fn_name = "call";
+
+            const auto& new_type = n.object->type;
+            it = structs.find(new_type);
+            if (it == structs.end())
+                fail(n, "'" + n.callable_name + "' is not callable: it is " + new_type);
+        }
+    }
 
     const auto& sinfo = it->second;
     auto m_it = sinfo.member_fns.find(n.fn_name);
     if (m_it == sinfo.member_fns.end())
-        fail(n, "struct '" + cur_type + "' has no member function '" + n.fn_name + "'");
+    {
+        if (n.is_callable_sugar)
+            fail(n, "'" + n.callable_name + "' is not callable: " + it->first + " has no member function 'call'");
+        fail(n, "struct '" + it->first + "' has no member function '" + n.fn_name + "'");
+    }
 
     MemberFnDeclNode* mfn = m_it->second;
     n.fn = mfn;
 
+    std::string display = n.is_callable_sugar ? n.callable_name : n.fn_name;
+
     if (n.args.size() != mfn->params.size())
-        fail(n, "'" + n.fn_name + "' takes " + std::to_string(mfn->params.size()) +
+        fail(n, "'" + display + "' takes " + std::to_string(mfn->params.size()) +
                 " argument(s), got " + std::to_string(n.args.size()));
 
     for (size_t i = 0; i < n.args.size(); ++i)
     {
         check_expr(n.args[i]);
+        reject_lambda_value(*n.args[i], "passed to '" + display + "'");
         const auto& want = mfn->params[i]->type_name;
         const auto& have = n.args[i]->type;
         if (have != want && !(have == "i32" && want == "i64"))
         {
             fail(*n.args[i], "cannot pass argument " + std::to_string(i + 1) + " of '" +
-                n.fn_name + "' of type " + want + " with a value of type " + have);
+                display + "' of type " + want + " with a value of type " + have);
         }
     }
 
@@ -771,16 +904,22 @@ llvm::Value* SemanticChecker::visit_member_call(MemberCallNode& n)
     {
         if (is_rooted_at_this(*n.object))
             call_edges[current_member_fn].insert(mfn);
-        deferred_calls.push_back({&n, mfn, is_chain_mut(*n.object), has_const_field_link(*n.object)});
+        deferred_calls.push_back({&n, mfn, is_chain_mut(*n.object), has_const_field_link(*n.object),
+                                   n.is_callable_sugar, display});
     }
     else
     {
         if (mfn->mutates)
         {
-            if (has_const_field_link(*n.object))
-                fail(n, "cannot call mutating member function '" + mfn->name + "' through a const field");
-            if (!is_chain_mut(*n.object))
-                fail(n, "cannot call mutating member function '" + mfn->name + "' on a const object");
+            if (n.is_callable_sugar) {
+                if (!is_chain_mut(*n.object) || has_const_field_link(*n.object))
+                    fail(n, "cannot call '" + n.callable_name + "': its 'call' changes it, and it is not mut");
+            } else {
+                if (has_const_field_link(*n.object))
+                    fail(n, "cannot call mutating member function '" + mfn->name + "' through a const field");
+                if (!is_chain_mut(*n.object))
+                    fail(n, "cannot call mutating member function '" + mfn->name + "' on a const object");
+            }
         }
     }
     return nullptr;
@@ -791,6 +930,7 @@ llvm::Value* SemanticChecker::visit_print(PrintNode& n)
     if (n.is_string) return nullptr;
 
     check_expr(n.expr);
+    reject_lambda_value(*n.expr, "printed");
     const auto& t = n.expr->type;
     if (!is_builtin_type(t) && !structs.count(t))
         fail(n, "cannot print value of type '" + t + "'");
@@ -802,6 +942,178 @@ llvm::Value* SemanticChecker::visit_read(ReadNode& n)
     n.type = "i32";
     return nullptr;
 }
+
+llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
+{
+    // Guard: don't lower twice (LambdaNode stays in tree)
+    if (L.lowered_struct) return nullptr;
+
+    // -------------------------------------------------------
+    // 1. Resolve captures
+    // -------------------------------------------------------
+    std::set<std::string> seen_caps;
+    bool any_mut = false;
+    std::vector<std::unique_ptr<FieldDeclNode>>    field_nodes;
+    std::vector<std::unique_ptr<ExprNode>>         init_items;
+    std::vector<FieldInfo>                         fields;
+    std::map<std::string, int>                     field_index_map;
+
+    for (const auto& cap : L.captures)
+    {
+        if (seen_caps.count(cap->name))
+            fail(*cap, "'" + cap->name + "' is captured twice");
+        seen_caps.insert(cap->name);
+
+        auto res = lookup_name(cap->name);
+        if (res.kind == LookupResult::NotFound)
+            fail(*cap, "cannot capture '" + cap->name + "': no variable '" + cap->name + "' is visible here");
+
+        // Determine the type of the captured variable
+        std::string cap_type;
+        if (res.kind == LookupResult::LocalVar)
+        {
+            cap_type = res.decl->type_name;
+        }
+        else // FieldOfThis
+        {
+            cap_type = res.field_type;
+        }
+
+        bool effective_mut = cap->is_mut;
+        any_mut = any_mut || effective_mut;
+
+        int idx = (int)fields.size();
+        field_index_map[cap->name] = idx;
+        fields.push_back({cap_type, cap->name, effective_mut, idx});
+
+        field_nodes.push_back(make_unique<FieldDeclNode>(
+            cap->line, cap->col, cap_type, cap->name, effective_mut));
+        init_items.push_back(make_unique<VarNameNode>(cap->line, cap->col, cap->name));
+    }
+
+    // -------------------------------------------------------
+    // 2. Check signature (params and return type)
+    // -------------------------------------------------------
+    if (!is_known_type(L.return_type))
+        fail(L, "unknown return type '" + L.return_type + "'");
+
+    std::set<std::string> param_names;
+    for (const auto& p : L.params)
+    {
+        if (!is_known_type(p->type_name))
+            fail(*p, "unknown type '" + p->type_name + "'");
+        if (param_names.count(p->name))
+            fail(*p, "parameter '" + p->name + "' is already declared");
+        if (seen_caps.count(p->name))
+            fail(*p, "parameter '" + p->name + "' has the same name as a capture");
+        param_names.insert(p->name);
+    }
+
+    // -------------------------------------------------------
+    // 3. Build the generated struct
+    // -------------------------------------------------------
+    // Generate a unique struct name: "lambda.<name>" or "lambda.<name>.<N>"
+    std::string sname = "lambda." + L.name;
+    if (structs.count(sname))
+    {
+        sname = "lambda." + L.name + "." + std::to_string(++lambda_counter);
+    }
+
+    // Build the call member function node (take ownership of params & body from L)
+    std::vector<std::unique_ptr<FuncParamNode>> call_params;
+    for (auto& p : L.params)
+    {
+        auto new_param = make_unique<FuncParamNode>(p->line, p->col, p->type_name, p->name);
+        call_params.push_back(std::move(new_param));
+    }
+
+    auto call_node_uptr = make_unique<MemberFnDeclNode>(
+        L.line, L.col, "call", L.return_type,
+        std::move(call_params), std::move(L.body));
+
+    auto struct_node_uptr = make_unique<StructDeclNode>(
+        L.line, L.col, sname,
+        std::move(field_nodes));
+
+    StructDeclNode* struct_node = struct_node_uptr.get();
+    MemberFnDeclNode* call_node = call_node_uptr.get();
+
+    // Add the call fn to the struct
+    call_node->struct_decl = struct_node;
+    struct_node->member_fns.push_back(std::move(call_node_uptr));
+
+    // Register struct info (without call yet — added after body check)
+    StructInfo sinfo;
+    sinfo.name = sname;
+    sinfo.is_lambda = true;
+    sinfo.fields = fields;
+    sinfo.field_index = field_index_map;
+    structs[sname] = std::move(sinfo);
+
+    // -------------------------------------------------------
+    // 4. Check the lambda body in a fresh scope, with captures as fields
+    // -------------------------------------------------------
+    {
+        // Save all state we will modify
+        auto saved_scopes         = scopes;
+        auto saved_struct_info    = current_struct_info;
+        auto saved_struct_node    = current_struct_node;
+        auto saved_fn             = current_fn;
+        auto saved_member_fn      = current_member_fn;
+        auto saved_in_member_pass = in_member_body_pass;
+
+        // Install a fresh scope (captures arrive via 'this')
+        scopes = { Scope{} };
+        current_struct_info  = &structs[sname];
+        current_struct_node  = struct_node;
+        current_fn           = call_node;
+        current_member_fn    = call_node;
+        in_member_body_pass  = false; // body runs in Phase 7 context
+
+        // Push a hint so fail_unknown_name gives helpful messages
+        lambda_hints.push_back({L.name, saved_scopes, saved_struct_info});
+
+        visit_member_fn_decl(*call_node);
+
+        lambda_hints.pop_back();
+
+        // Restore all state
+        scopes              = std::move(saved_scopes);
+        current_struct_info = saved_struct_info;
+        current_struct_node = saved_struct_node;
+        current_fn          = saved_fn;
+        current_member_fn   = saved_member_fn;
+        in_member_body_pass = saved_in_member_pass;
+    }
+
+    // -------------------------------------------------------
+    // 5. Register call in member_fns (after body check)
+    // -------------------------------------------------------
+    structs[sname].member_fns["call"] = call_node;
+
+    // Determine mutates: does the call body write to any capture (field)?
+    // visit_member_fn_decl already called — if it mutates, directly_mutates has it
+    call_node->mutates = directly_mutates.count(call_node) > 0;
+
+    // -------------------------------------------------------
+    // 6. Build the closure variable declaration
+    // -------------------------------------------------------
+    auto init_node_ptr = make_unique<InitNode>(L.line, L.col, std::move(init_items));
+    auto decl = make_unique<DeclNode>(
+        L.line, L.col, sname, L.name, any_mut, std::move(init_node_ptr));
+    decl->is_closure_init = true;
+    L.lowered_struct = struct_node;
+    L.lowered_decl   = std::move(decl);
+
+    // -------------------------------------------------------
+    // 7. Collect the generated struct and visit the closure decl
+    // -------------------------------------------------------
+    generated_structs.push_back(std::move(struct_node_uptr));
+    L.lowered_decl->accept(*this);
+
+    return nullptr;
+}
+
 
 llvm::Value* SemanticChecker::visit_init(InitNode& n)
 {

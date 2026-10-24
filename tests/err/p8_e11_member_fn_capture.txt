@@ -1,0 +1,10 @@
+struct S
+{
+i32 x
+fn f := [x](i32 n) -> i32
+{
+exit n
+}
+}
+S s {1}
+exit s.f(2)

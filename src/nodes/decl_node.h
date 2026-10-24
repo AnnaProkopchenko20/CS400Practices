@@ -11,6 +11,7 @@ struct DeclNode : StmtNode {
     std::string type_name;
     std::string name;
     bool        is_mut;
+    bool        is_closure_init = false; // set on generated closure variable decls
     std::unique_ptr<InitNode> expr;
 
     DeclNode(int l, int c, std::string t, std::string n, bool m, std::unique_ptr<InitNode> e)

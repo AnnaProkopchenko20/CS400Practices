@@ -1,0 +1,16 @@
+i32 mut total {0}
+i32 mut i {1}
+i32 mut step {10}
+while i == 1
+{
+fn counter := [mut step]() -> i32
+{
+step := step + 1
+exit step
+}
+i32 a {counter()}
+i32 b {counter()}
+total := a + b + step
+i := 0
+}
+exit total

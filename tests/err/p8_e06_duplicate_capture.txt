@@ -1,0 +1,6 @@
+i32 k {5}
+fn f := [k, k](i32 x) -> i32
+{
+exit x
+}
+exit f(1)
