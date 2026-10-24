@@ -28,7 +28,11 @@ for t in tests/ok/*.txt tests/err/*.txt; do
 
     ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
     if [ $? -eq 0 ]; then
-        lli "$tmp/out.ll" > "$tmp/actual" 2>&1
+        if [ -f "$base.in" ]; then
+            lli "$tmp/out.ll" < "$base.in" > "$tmp/actual" 2>&1
+        else
+            lli "$tmp/out.ll" > "$tmp/actual" 2>&1
+        fi
     elif [ -f "$tmp/out.ll" ]; then
         echo "FAIL     $name  (output file written despite error)"; fail=$((fail+1))
     fi
@@ -37,6 +41,14 @@ for t in tests/ok/*.txt tests/err/*.txt; do
     if [ -f "$base.ast" ]; then
         ./build/compiler --ast "$t" > "$tmp/ast" 2>&1
         check "$name [ast]" "$tmp/ast" "$base.ast"
+    fi
+
+    if [ -f "$base.ircheck" ]; then
+        if bash "$base.ircheck" "$tmp/out.ll" > "$tmp/iractual" 2>&1; then
+            echo "PASS     $name [ircheck]"; pass=$((pass+1))
+        else
+            echo "FAIL     $name [ircheck]"; cat "$tmp/iractual"; fail=$((fail+1))
+        fi
     fi
 done
 

@@ -1,0 +1,6 @@
+fn printf := (i32 a) -> i32
+{
+    i32 r{a + 42}
+    exit r
+}
+exit printf(8)

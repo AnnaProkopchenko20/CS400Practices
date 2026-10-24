@@ -1,0 +1,14 @@
+struct Point
+{
+    i32 x
+    fn calc := () -> i32
+    {
+        exit x
+    }
+    fn calc := (i32 a) -> i32
+    {
+        exit a
+    }
+}
+Point p{1}
+exit p.x

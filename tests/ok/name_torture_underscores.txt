@@ -1,0 +1,25 @@
+struct A_b
+{
+    i32 x
+    fn c := () -> i32
+    {
+        exit x
+    }
+}
+struct A
+{
+    i32 x
+    fn b_c := () -> i32
+    {
+        i32 r{x + 1}
+        exit r
+    }
+}
+fn A_b_c := () -> i32
+{
+    exit 1000
+}
+A_b p{5}
+A q{7}
+i32 r{p.c() + q.b_c() + A_b_c()}
+exit r

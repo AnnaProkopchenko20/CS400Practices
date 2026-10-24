@@ -161,7 +161,7 @@ std::unique_ptr<ProgramNode> Parser::parse_program()
         std::move(stmts), std::move(exit_node));
 }
 
-// struct ::= "struct" ident NL "{" NL field_decl { field_decl } "}" NL
+// struct ::= "struct" ident NL "{" NL field_decl { field_decl } { fn } "}" NL
 std::unique_ptr<StructDeclNode> Parser::parse_struct_decl()
 {
     Token kw_tok = eat();
@@ -182,6 +182,9 @@ std::unique_ptr<StructDeclNode> Parser::parse_struct_decl()
     end_of_line();
 
     std::vector<std::unique_ptr<FieldDeclNode>> fields;
+    std::vector<std::unique_ptr<MemberFnDeclNode>> member_fns;
+    bool seen_member_fn = false;
+
     while (true)
     {
         if (!peek_line())
@@ -193,10 +196,25 @@ std::unique_ptr<StructDeclNode> Parser::parse_struct_decl()
             eat(); end_of_line();
             if (fields.empty())
                 throw error_at(open, "a struct must have at least one field");
-            return make_unique<StructDeclNode>(
+            auto sdecl = make_unique<StructDeclNode>(
                 kw_tok.line, kw_tok.col,
-                name.text, std::move(fields));
+                name.text, std::move(fields), std::move(member_fns));
+            for (auto& m : sdecl->member_fns)
+                m->struct_decl = sdecl.get();
+            return sdecl;
         }
+
+        if (at("keyword", kw::FN))
+        {
+            if (fields.empty())
+                throw error_at(*peek(), "member function before first field");
+            seen_member_fn = true;
+            member_fns.push_back(parse_member_fn());
+            continue;
+        }
+
+        if (seen_member_fn)
+            throw error_at(*peek(), "field declaration after member function");
 
         fields.push_back(parse_field_decl());
     }
@@ -215,17 +233,8 @@ std::unique_ptr<FieldDeclNode> Parser::parse_field_decl()
         type_tok.text, name_tok.text, is_mut);
 }
 
-// fn ::= "fn" ident ":=" "(" [ param { "," param } ] ")" "->" type NL block
-std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
+std::vector<std::unique_ptr<FuncParamNode>> Parser::parse_params()
 {
-    Token kw_tok = eat();
-    Token name   = expect("identifier", "", "a function name");
-    expect("operator", ":=", "':='");
-
-    if (!at("parentheses", "("))
-        throw error("expected '('");
-    eat();
-
     std::vector<std::unique_ptr<FuncParamNode>> params;
     if (!at("parentheses", ")"))
     {
@@ -238,10 +247,35 @@ std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
                 break;
         }
     }
-    if (!at("parentheses", ")"))
-        throw error("expected ')'");
-    eat();
+    return params;
+}
 
+std::vector<std::unique_ptr<ExprNode>> Parser::parse_args()
+{
+    std::vector<std::unique_ptr<ExprNode>> args;
+    if (!at("parentheses", ")"))
+    {
+        while (true)
+        {
+            args.push_back(parse_expr());
+            if (at("comma", ","))
+                eat();
+            else
+                break;
+        }
+    }
+    return args;
+}
+
+// fn ::= "fn" ident ":=" "(" [ param { "," param } ] ")" "->" type NL block
+std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
+{
+    Token kw_tok = eat();
+    Token name   = expect("identifier", "", "a function name");
+    expect("operator", ":=", "':='");
+    expect("parentheses", "(", "'('");
+    auto params = parse_params();
+    expect("parentheses", ")", "')'");
     expect("operator", "->", "'->'");
     Token ret_type = expect_type();
     end_of_line();
@@ -251,6 +285,28 @@ std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
         throw error_at(kw_tok, "function '" + name.text + "' must end with 'exit'");
 
     return make_unique<FunctionDeclNode>(
+        kw_tok.line, kw_tok.col,
+        name.text, ret_type.text,
+        std::move(params), std::move(body));
+}
+
+std::unique_ptr<MemberFnDeclNode> Parser::parse_member_fn()
+{
+    Token kw_tok = eat();
+    Token name   = expect("identifier", "", "a function name");
+    expect("operator", ":=", "':='");
+    expect("parentheses", "(", "'('");
+    auto params = parse_params();
+    expect("parentheses", ")", "')'");
+    expect("operator", "->", "'->'");
+    Token ret_type = expect_type();
+    end_of_line();
+
+    auto body = parse_block(kw::FN);
+    if (!body->exit_stmt)
+        throw error_at(kw_tok, "function '" + name.text + "' must end with 'exit'");
+
+    return make_unique<MemberFnDeclNode>(
         kw_tok.line, kw_tok.col,
         name.text, ret_type.text,
         std::move(params), std::move(body));
@@ -266,16 +322,42 @@ std::unique_ptr<FuncParamNode> Parser::parse_param()
         type_tok.text, name_tok.text);
 }
 
-// statement ::= declaration | assignment | if_stmt | while_stmt
+// statement ::= declaration | assignment | if_stmt | while_stmt | print_stmt
 std::unique_ptr<StmtNode> Parser::parse_statement()
 {
-    if (at_decl())              { auto s = parse_decl();   end_of_line(); return s; }
-    if (at("identifier"))       { auto s = parse_assign(); end_of_line(); return s; }
-    if (at("keyword", kw::IF))  { return parse_if(); }
-    if (at("keyword", kw::WHILE)){ return parse_while(); }
+    if (at_decl())                { auto s = parse_decl();   end_of_line(); return s; }
+    if (at("identifier"))         { auto s = parse_assign(); end_of_line(); return s; }
+    if (at("keyword", kw::IF))    { return parse_if(); }
+    if (at("keyword", kw::WHILE)) { return parse_while(); }
+    if (at("keyword", kw::PRINT)) { auto s = parse_print();  end_of_line(); return s; }
     if (at("keyword", kw::ELSE))
         throw error_at(*peek(), "'else' without an 'if'");
     throw error_at(*peek(), "cannot start a statement with '" + peek()->text + "'");
+}
+
+// print ::= "print" "(" ( string | expr ) ")"
+std::unique_ptr<StmtNode> Parser::parse_print()
+{
+    Token kw_tok = eat();
+    expect("parentheses", "(", "'('");
+    if (at("parentheses", ")"))
+        throw error_at(*peek(), "expected an expression or string literal");
+
+    std::unique_ptr<StmtNode> node;
+    if (at("string"))
+    {
+        Token str_tok = eat();
+        std::string text = str_tok.text.substr(1, str_tok.text.size() - 2);
+        node = make_unique<PrintNode>(kw_tok.line, kw_tok.col, text);
+    }
+    else
+    {
+        auto expr = parse_expr();
+        node = make_unique<PrintNode>(kw_tok.line, kw_tok.col, std::move(expr));
+    }
+
+    expect("parentheses", ")", "')'");
+    return node;
 }
 
 // init ::= "{" value { "," value } "}"
@@ -323,12 +405,12 @@ std::unique_ptr<StmtNode> Parser::parse_decl()
 std::unique_ptr<StmtNode> Parser::parse_assign()
 {
     Token name = eat();
-    std::vector<std::string> fields;
+    std::unique_ptr<ExprNode> lhs = make_unique<VarNameNode>(name.line, name.col, name.text);
     while (at("dot", "."))
     {
-        eat();
+        Token dot = eat();
         Token f = expect("identifier", "", "a field name");
-        fields.push_back(f.text);
+        lhs = make_unique<FieldAccessNode>(dot.line, dot.col, std::move(lhs), f.text);
     }
 
     if (!at("operator", ":="))
@@ -336,9 +418,7 @@ std::unique_ptr<StmtNode> Parser::parse_assign()
     eat();
 
     auto value = parse_expr();
-    if (fields.empty())
-        return make_unique<AsmtNode>(name.line, name.col, name.text, std::move(value));
-    return make_unique<AsmtNode>(name.line, name.col, name.text, std::move(fields), std::move(value));
+    return make_unique<AsmtNode>(name.line, name.col, std::move(lhs), std::move(value));
 }
 
 // exit_stmt ::= "exit" factor
@@ -394,7 +474,58 @@ std::unique_ptr<ExprNode> Parser::parse_term()
     return node;
 }
 
-// factor ::= number | "true" | "false" | identifier | field | call | "!" factor
+std::unique_ptr<ExprNode> Parser::parse_read()
+{
+    Token t = eat(); // 'read'
+    expect("parentheses", "(", "'('");
+    expect("parentheses", ")", "')'");
+    return make_unique<ReadNode>(t.line, t.col);
+}
+
+std::unique_ptr<ExprNode> Parser::parse_member_call(std::unique_ptr<ExprNode> left, const Token& name, const Token& dot_tok)
+{
+    expect("parentheses", "(", "'('");
+    auto args = parse_args();
+    expect("parentheses", ")", "')'");
+    return make_unique<MemberCallNode>(dot_tok.line, dot_tok.col, std::move(left), name.text, std::move(args));
+}
+
+std::unique_ptr<ExprNode> Parser::parse_field_access(std::unique_ptr<ExprNode> left, const Token& name, const Token& dot_tok)
+{
+    return make_unique<FieldAccessNode>(dot_tok.line, dot_tok.col, std::move(left), name.text);
+}
+
+std::unique_ptr<ExprNode> Parser::parse_identifier_chain()
+{
+    Token t = eat();
+    std::unique_ptr<ExprNode> left;
+
+    if (at("parentheses", "("))
+    {
+        eat();
+        auto args = parse_args();
+        expect("parentheses", ")", "')'");
+        left = make_unique<FunctionCallNode>(t.line, t.col, t.text, std::move(args));
+    }
+    else
+    {
+        left = make_unique<VarNameNode>(t.line, t.col, t.text);
+    }
+
+    while (at("dot", "."))
+    {
+        Token dot_tok = eat();
+        Token name = expect("identifier", "", "a field or member function name");
+        if (at("parentheses", "("))
+            left = parse_member_call(std::move(left), name, dot_tok);
+        else
+            left = parse_field_access(std::move(left), name, dot_tok);
+    }
+
+    return left;
+}
+
+// factor ::= number | "true" | "false" | identifier_chain | "!" factor | read
 std::unique_ptr<ExprNode> Parser::parse_factor()
 {
     if (at("operator", "!"))
@@ -402,45 +533,23 @@ std::unique_ptr<ExprNode> Parser::parse_factor()
         Token t = eat();
         return make_unique<NotNode>(t.line, t.col, parse_factor());
     }
-    if (at("identifier"))
+    if (at("number"))
     {
         Token t = eat();
-        if (at("parentheses", "("))
-        {
-            eat();
-            std::vector<std::unique_ptr<ExprNode>> args;
-            if (!at("parentheses", ")"))
-            {
-                while (true)
-                {
-                    args.push_back(parse_expr());
-                    if (at("comma", ","))
-                        eat();
-                    else
-                        break;
-                }
-            }
-            expect("parentheses", ")", "')'");
-            return make_unique<FunctionCallNode>(t.line, t.col, t.text, std::move(args));
-        }
-        if (at("dot", "."))
-        {
-            std::vector<std::string> fields;
-            while (at("dot", "."))
-            {
-                eat();
-                Token f = expect("identifier", "", "a field name");
-                fields.push_back(f.text);
-            }
-            return make_unique<StructFieldAccessNode>(t.line, t.col, t.text, std::move(fields));
-        }
-        return make_unique<VarNameNode>(t.line, t.col, t.text);
+        return make_unique<NumberNode>(t.line, t.col, t.text);
     }
-    if (at("number"))      { Token t = eat(); return make_unique<NumberNode>(t.line, t.col, t.text); }
     if (at("keyword", kw::TRUE_) || at("keyword", kw::FALSE_))
     {
         Token t = eat();
         return make_unique<BoolNode>(t.line, t.col, t.text == kw::TRUE_);
+    }
+    if (at("keyword", kw::READ))
+    {
+        return parse_read();
+    }
+    if (at("identifier"))
+    {
+        return parse_identifier_chain();
     }
     throw error("expected a constant, variable, or '!'");
 }

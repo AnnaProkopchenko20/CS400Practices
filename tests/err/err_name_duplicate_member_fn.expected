@@ -1,0 +1,1 @@
+compilation error: line 8:5: member function 'calc' is already declared in struct 'Point'

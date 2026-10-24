@@ -1,0 +1,6 @@
+struct Circle
+{
+    i32 radius
+}
+Circle c{5}
+exit c.d2()

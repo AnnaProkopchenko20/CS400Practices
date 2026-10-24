@@ -1,0 +1,13 @@
+struct Box
+{
+    i32 v
+    fn calc := (i32 v) -> i32
+    {
+        i32 mut v{v + 10}
+        v := v * 2
+        exit v
+    }
+}
+Box b{5}
+i32 r{b.calc(3)}
+exit r

@@ -1,0 +1,10 @@
+struct main
+{
+    i32 x
+}
+fn main := () -> i32
+{
+    exit 0
+}
+main m{1}
+exit m.x

@@ -1,0 +1,25 @@
+struct Counter
+{
+    i32 dummy
+    fn is_even := (i32 n) -> bool
+    {
+        if n == 0
+        {
+            exit true
+        }
+        bool r{is_odd(n - 1)}
+        exit r
+    }
+    fn is_odd := (i32 n) -> bool
+    {
+        if n == 0
+        {
+            exit false
+        }
+        bool r{is_even(n - 1)}
+        exit r
+    }
+}
+Counter c{0}
+print(c.is_even(10))
+exit 0

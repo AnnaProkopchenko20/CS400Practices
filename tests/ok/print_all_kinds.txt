@@ -1,0 +1,10 @@
+i32 neg{0 - 9}
+i64 big{6000000000}
+bool t{true}
+bool f{false}
+print("100% discount\nno newline")
+print(neg)
+print(big)
+print(t)
+print(f)
+exit 0

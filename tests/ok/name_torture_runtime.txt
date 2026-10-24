@@ -1,0 +1,50 @@
+struct Box
+{
+    i32 mut v
+    fn main := () -> i32
+    {
+        v := v + 1
+        exit v
+    }
+    fn printf := (i32 k) -> i32
+    {
+        i32 r{v + k}
+        exit r
+    }
+    fn scanf := (i32 k) -> i32
+    {
+        i32 a{main()}
+        i32 b{printf(k)}
+        i32 r{a + b}
+        exit r
+    }
+}
+fn main := () -> i32
+{
+    exit 100
+}
+fn printf := (i32 a) -> i32
+{
+    i32 r{a * 2}
+    exit r
+}
+fn scanf := (i32 a) -> i32
+{
+    i32 r{a * 3}
+    exit r
+}
+Box mut b{10}
+i32 x{main()}
+i32 y{printf(5)}
+i32 z{scanf(7)}
+i32 p{b.main()}
+i32 q{b.printf(5)}
+i32 s{b.scanf(1)}
+print(x)
+print(y)
+print(z)
+print(p)
+print(q)
+print(s)
+print(b)
+exit b.v
