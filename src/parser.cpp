@@ -100,6 +100,63 @@ void Parser::end_of_line()
 
 Parser::Parser(const std::vector<std::vector<Token>>& l) : lines(l) {}
 
+// at_lambda: current token starts "fn name := [" (a lambda, not a function decl)
+bool Parser::at_lambda() const
+{
+    // Need at least 4 tokens: fn  ident  :=  [
+    if (!at("keyword", kw::FN)) return false;
+    if (pos + 1 >= toks.size()) return false;
+    if (toks[pos + 1].kind != "identifier") return false;
+    if (pos + 2 >= toks.size()) return false;
+    if (toks[pos + 2].kind != "operator" || toks[pos + 2].text != ":=") return false;
+    if (pos + 3 >= toks.size()) return false;
+    if (toks[pos + 3].kind != "bracket" || toks[pos + 3].text != "[") return false;
+    return true;
+}
+
+// parse_captures: after '[' has been eaten, reads 0 or more captures up to ']'
+std::vector<std::unique_ptr<LambdaCapture>> Parser::parse_captures()
+{
+    std::vector<std::unique_ptr<LambdaCapture>> caps;
+    if (at("bracket", "]")) return caps;
+    while (true)
+    {
+        bool is_mut = at("keyword", kw::MUT);
+        if (is_mut) eat();
+        Token tok = expect("identifier", "", "a captured variable name");
+        caps.push_back(make_unique<LambdaCapture>(tok.line, tok.col, tok.text, is_mut));
+        if (at("comma", ",")) eat();
+        else break;
+    }
+    return caps;
+}
+
+// parse_lambda: fn name := [captures](params) -> type NL block
+std::unique_ptr<LambdaNode> Parser::parse_lambda()
+{
+    Token kw_tok = eat();   // 'fn'
+    Token name   = expect("identifier", "", "a lambda name");
+    expect("operator", ":=", "':='");
+    expect("bracket",  "[",  "'['");
+    auto captures = parse_captures();
+    expect("bracket",  "]",  "']'");
+    expect("parentheses", "(", "'('");
+    auto params = parse_params();
+    expect("parentheses", ")", "')'");
+    expect("operator", "->", "'->'");
+    Token ret_type = expect_type();
+    end_of_line();
+
+    auto body = parse_block(kw::FN);
+    if (!body->exit_stmt)
+        throw error_at(kw_tok, "lambda '" + name.text + "' must end with 'exit'");
+
+    return make_unique<LambdaNode>(
+        kw_tok.line, kw_tok.col,
+        name.text, std::move(captures),
+        ret_type.text, std::move(params), std::move(body));
+}
+
 enum class ProgramSection { Structs, Functions, Statements, Exit };
 
 // program ::= { struct } { fn } { statement } exit_stmt
@@ -134,10 +191,19 @@ std::unique_ptr<ProgramNode> Parser::parse_program()
         }
         else if (at("keyword", kw::FN))
         {
-            if (section > ProgramSection::Functions)
-                throw error_at(toks[0], "function declarations come before the statements");
-            section = ProgramSection::Functions;
-            functions.push_back(parse_fn_decl());
+            if (at_lambda())
+            {
+                // Lambda is allowed anywhere a statement is; treat it as a statement
+                section = ProgramSection::Statements;
+                stmts.push_back(parse_lambda());
+            }
+            else
+            {
+                if (section > ProgramSection::Functions)
+                    throw error_at(toks[0], "function declarations come before the statements");
+                section = ProgramSection::Functions;
+                functions.push_back(parse_fn_decl());
+            }
         }
         else if (at("keyword", kw::EXIT))
         {
@@ -295,6 +361,8 @@ std::unique_ptr<MemberFnDeclNode> Parser::parse_member_fn()
     Token kw_tok = eat();
     Token name   = expect("identifier", "", "a function name");
     expect("operator", ":=", "':='");
+    if (at("bracket", "["))
+        throw error_at(*peek(), "a member function cannot have a capture list");
     expect("parentheses", "(", "'('");
     auto params = parse_params();
     expect("parentheses", ")", "')'");
@@ -330,6 +398,11 @@ std::unique_ptr<StmtNode> Parser::parse_statement()
     if (at("keyword", kw::IF))    { return parse_if(); }
     if (at("keyword", kw::WHILE)) { return parse_while(); }
     if (at("keyword", kw::PRINT)) { auto s = parse_print();  end_of_line(); return s; }
+    if (at("keyword", kw::FN))
+    {
+        if (at_lambda()) return parse_lambda();
+        throw error_at(*peek(), "function declarations are not allowed inside a block");
+    }
     if (at("keyword", kw::ELSE))
         throw error_at(*peek(), "'else' without an 'if'");
     throw error_at(*peek(), "cannot start a statement with '" + peek()->text + "'");

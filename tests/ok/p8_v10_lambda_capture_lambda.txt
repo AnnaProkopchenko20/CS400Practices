@@ -1,0 +1,13 @@
+fn dbl := [](i32 x) -> i32
+{
+i32 r{x + x}
+exit r
+}
+fn quad := [dbl](i32 x) -> i32
+{
+i32 a{dbl.call(x)}
+i32 b{dbl.call(a)}
+exit b
+}
+i32 r {quad(3)}
+exit r

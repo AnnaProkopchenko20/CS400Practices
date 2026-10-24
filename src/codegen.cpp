@@ -14,6 +14,15 @@ CodeGen::CodeGen() : builder(context)
 
 std::string CodeGen::member_fn_ir_name(const std::string& struct_name, const std::string& fn_name)
 {
+    // Lambda structs are named "lambda.<name>"; the '.' already prevents user-name clashes.
+    // Use the name directly (replacing '.' with '_') without doubling underscores.
+    if (struct_name.rfind("lambda.", 0) == 0)
+    {
+        std::string s_esc;
+        for (char ch : struct_name)
+            s_esc += (ch == '.') ? '_' : ch;
+        return s_esc + "_" + fn_name;
+    }
     if (struct_name.find('_') != std::string::npos || fn_name.find('_') != std::string::npos)
     {
         std::string s_esc;
@@ -197,6 +206,32 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
         ir_functions[fn->name] = f;
     }
 
+    // Step 4b: Create main and everything print/read need, BEFORE any body
+    // is generated. Member function and global function bodies use printf,
+    // scanf and the true/false strings, so these must exist by then.
+    // CreateGlobalStringPtr needs an insert point, so main's entry block
+    // is created first and used as the temporary one.
+    llvm::FunctionType* main_ft = llvm::FunctionType::get(i32_type, false);
+    main_func = llvm::Function::Create(
+        main_ft, llvm::Function::ExternalLinkage, "main", module.get());
+    llvm::BasicBlock* main_entry = llvm::BasicBlock::Create(context, "entry", main_func);
+    builder.SetInsertPoint(main_entry);
+
+    fmt_int   = builder.CreateGlobalStringPtr("Program exit with result %lld\n", "fmt_int");
+    fmt_bool  = builder.CreateGlobalStringPtr("Program exit with result %s\n",   "fmt_bool");
+    true_str  = builder.CreateGlobalStringPtr("true",  "str_true");
+    false_str = builder.CreateGlobalStringPtr("false", "str_false");
+
+    llvm::FunctionType* pft = llvm::FunctionType::get(
+        i32_type, {llvm::PointerType::getUnqual(context)}, true);
+    printf_func = module->getOrInsertFunction("printf", pft);
+
+    llvm::FunctionType* sft = llvm::FunctionType::get(
+        i32_type, {llvm::PointerType::getUnqual(context)}, true);
+    scanf_func = module->getOrInsertFunction("scanf", sft);
+
+    read_slot = nullptr;
+
     // Step 5: Define member functions
     for (auto& s : n.structs)
     {
@@ -213,27 +248,14 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
     for (auto& fn : n.functions)
         visit_fn_decl(*fn);
 
-    // Step 7: Define main
+    // Step 7: Define main body
     current_fn = nullptr;
-    llvm::FunctionType* ft = llvm::FunctionType::get(i32_type, false);
-    main_func = llvm::Function::Create(
-        ft, llvm::Function::ExternalLinkage, "main", module.get());
-    llvm::BasicBlock* bb = llvm::BasicBlock::Create(context, "entry", main_func);
-    builder.SetInsertPoint(bb);
+    current_struct = nullptr;
+    current_this_ptr = nullptr;
+    allocas.clear();
+    builder.SetInsertPoint(main_entry);
 
-    fmt_int   = builder.CreateGlobalStringPtr("Program exit with result %lld\n", "fmt_int");
-    fmt_bool  = builder.CreateGlobalStringPtr("Program exit with result %s\n",   "fmt_bool");
-    true_str  = builder.CreateGlobalStringPtr("true",  "str_true");
-    false_str = builder.CreateGlobalStringPtr("false", "str_false");
-
-    llvm::FunctionType* pft = llvm::FunctionType::get(
-        i32_type, {llvm::PointerType::getUnqual(context)}, true);
-    printf_func = module->getOrInsertFunction("printf", pft);
-
-    llvm::FunctionType* sft = llvm::FunctionType::get(
-        i32_type, {llvm::PointerType::getUnqual(context)}, true);
-    scanf_func = module->getOrInsertFunction("scanf", sft);
-
+    // read_slot belongs to one function: main gets its own
     read_slot = create_entry_alloca(i32_type, "read_slot");
 
     for (auto& s : n.stmts) s->accept(*this);
@@ -250,6 +272,7 @@ llvm::Value* CodeGen::visit_struct_decl(StructDeclNode&)
 llvm::Value* CodeGen::visit_fn_decl(FunctionDeclNode& n)
 {
     current_fn = &n;
+    read_slot = nullptr; // per-function: created lazily in this function's entry block
     llvm::Function* f = ir_functions[n.name];
 
     llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", f);
@@ -277,6 +300,7 @@ llvm::Value* CodeGen::visit_fn_decl(FunctionDeclNode& n)
     }
 
     current_fn = nullptr;
+    read_slot = nullptr;
     return f;
 }
 
@@ -284,6 +308,7 @@ llvm::Value* CodeGen::visit_member_fn_decl(MemberFnDeclNode& n)
 {
     current_fn = &n;
     current_struct = n.struct_decl;
+    read_slot = nullptr; // per-function: created lazily in this function's entry block
     std::string ir_name = member_fn_ir_name(current_struct->name, n.name);
     llvm::Function* f = ir_member_functions[ir_name];
 
@@ -316,6 +341,7 @@ llvm::Value* CodeGen::visit_member_fn_decl(MemberFnDeclNode& n)
     current_fn = nullptr;
     current_struct = nullptr;
     current_this_ptr = nullptr;
+    read_slot = nullptr;
     return f;
 }
 
@@ -622,8 +648,20 @@ llvm::Value* CodeGen::visit_print(PrintNode& n)
     return nullptr;
 }
 
+llvm::Value* CodeGen::visit_lambda(LambdaNode& L)
+{
+    // The semantic checker built lowered_decl; the generated struct is already
+    // in n.structs (appended at end of visit_program) so its type + call fn
+    // were emitted by visit_struct_decl. We just emit the closure variable.
+    if (L.lowered_decl)
+        return L.lowered_decl->accept(*this);
+    return nullptr;
+}
+
 llvm::Value* CodeGen::visit_read(ReadNode&)
 {
+    // read_slot is reset to nullptr at the start of every function, so the
+    // slot always lives in the entry block of the function being generated.
     if (!read_slot)
         read_slot = create_entry_alloca(i32_type, "read_slot");
     llvm::Value* fmt = builder.CreateGlobalStringPtr("%d", "fmt_read");

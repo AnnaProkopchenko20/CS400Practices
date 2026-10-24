@@ -1,0 +1,10 @@
+fn apply := (i32 n) -> i32
+{
+exit n
+}
+fn sq := [](i32 x) -> i32
+{
+exit x
+}
+i32 r {apply(sq)}
+exit r

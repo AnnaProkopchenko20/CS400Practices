@@ -15,6 +15,9 @@ struct MemberCallNode : ValueNode {
     std::string fn_name;
     std::vector<std::unique_ptr<ExprNode>> args;
     MemberFnDeclNode* fn = nullptr;
+    // Practice 8: set when this call was rewritten from a callable-object call
+    bool        is_callable_sugar = false;
+    std::string callable_name;  // the variable name (for error messages)
 
     MemberCallNode(int l, int c, std::unique_ptr<ExprNode> obj, std::string name,
                    std::vector<std::unique_ptr<ExprNode>> a)
@@ -22,9 +25,14 @@ struct MemberCallNode : ValueNode {
 
     void dump(int d) const override {
         indent(d);
-        std::cout << "MemberCall " << fn_name << "\n";
-        if (object) object->dump(d + 1);
-        for (const auto& a : args) a->dump(d + 1);
+        if (is_callable_sugar) {
+            std::cout << "CallableCall " << callable_name << "\n";
+            for (const auto& a : args) a->dump(d + 1);
+        } else {
+            std::cout << "MemberCall " << fn_name << "\n";
+            if (object) object->dump(d + 1);
+            for (const auto& a : args) a->dump(d + 1);
+        }
     }
 
     llvm::Value* accept(Visitor& v) override { return v.visit_member_call(*this); }

@@ -1,0 +1,10 @@
+fn greet := [](i32 x) -> i32
+{
+print("hello")
+i32 input{read()}
+print(input)
+i32 r{x + input}
+exit r
+}
+i32 r {greet(4)}
+exit r

@@ -1,0 +1,7 @@
+fn sq := [](i32 x) -> i32
+{
+i32 r{x + x}
+exit r
+}
+i32 r {sq(5)}
+exit r

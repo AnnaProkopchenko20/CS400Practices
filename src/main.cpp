@@ -17,14 +17,16 @@
 
 int main(int argc, char* argv[])
 {
-    bool print_ast    = false;
-    bool print_tokens = false;
+    bool print_ast     = false;
+    bool print_ast_checked = false;
+    bool print_tokens  = false;
     std::vector<std::string> args;
 
     for (int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
-        if      (arg == "--ast")    { print_ast    = true; }
+        if      (arg == "--ast")         { print_ast         = true; }
+        else if (arg == "--ast-checked")  { print_ast_checked = true; }
         else if (arg == "--tokens") { print_tokens = true; }
         else                        { args.push_back(arg); }
     }
@@ -50,7 +52,7 @@ int main(int argc, char* argv[])
                     std::cout << t.kind << "('" << t.text << "') ";
                 std::cout << "\n";
             }
-            if (!print_ast) return 0;
+            if (!print_ast && !print_ast_checked) return 0;
         }
 
         Parser parser(token_lines);
@@ -60,6 +62,8 @@ int main(int argc, char* argv[])
         program->accept(checker);
 
         if (print_ast) { program->dump(0); return 0; }
+
+        if (print_ast_checked) { program->dump(0); return 0; }
 
         if (args.size() < 2)
         {
