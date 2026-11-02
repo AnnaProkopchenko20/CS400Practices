@@ -1470,3 +1470,18 @@ What Was Changed & Written Independently:
 - Added CLI option handling in `main.cpp` for `--remove-unused`, `--keep-calls`, and `--opt-stats` flags
 - Created test cases in `tests/opt/` covering shadowed variables, printing call preservation, sibling member calls, lambda captures, and call-graph effect propagation
 - Verified AST node deallocation statistics (`Node::live`) under AddressSanitizer (`-fsanitize=address`)
+
+===============================================================================
+AI Usage Log Update - Final Reviewer Feedback Adjustments
+===============================================================================
+
+Prompts & Iterative Intent:
+- Resolved final PR review items regarding semantic type safety and LLVM IR mangling conventions.
+- Added type validation to prevent `exit` statements from returning struct instances.
+- Added validation in struct checking to reject self-referential / recursive struct fields (e.g., `struct Node { Node next }`).
+- Corrected synthetic lambda struct symbol generation to use `@lambda.<name>_call` format.
+
+What Was Changed & Written Independently:
+- Updated `SemanticChecker::visit_exit` to verify `n.expr->type` is not a registered struct type.
+- Updated `SemanticChecker::visit_struct_decl` to fail when a field type matches the enclosing struct name.
+- Adjusted lambda struct name generation in `SemanticChecker::visit_lambda` and symbol resolution in `CodeGen::member_fn_ir_name` to produce valid `@lambda.<name>_call` symbols in LLVM IR output.

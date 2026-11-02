@@ -1,0 +1,1 @@
+compilation error: line 3:5: struct 'Node' cannot contain a field of its own type 'Node'

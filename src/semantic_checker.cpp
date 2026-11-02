@@ -339,6 +339,23 @@ void SemanticChecker::check_init_item(std::unique_ptr<ExprNode>& item, const std
 
 llvm::Value* SemanticChecker::visit_struct_decl(StructDeclNode& n)
 {
+    // Check fields
+    std::set<std::string> field_names;
+    for (const auto& field : n.fields)
+    {
+        // 1. Reject recursive/self-referential struct definitions
+        if (field->type_name == n.name)
+        {
+            fail(*field, "struct '" + n.name + "' cannot contain a field of its own type '" + field->type_name + "'");
+        }
+
+        // 2. Reject duplicate field names
+        if (!field_names.insert(field->name).second)
+        {
+            fail(*field, "duplicate field name '" + field->name + "' in struct '" + n.name + "'");
+        }
+    }
+
     check_new_name(n, n.name);
     if (structs.count(n.name))
         fail(n, "struct '" + n.name + "' is already declared");
@@ -554,6 +571,13 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
     {
         check_assignable(*n.exit_stmt->expr, current_fn->return_type, *n.exit_stmt, "return");
     }
+    else
+    {
+        if (structs.count(n.exit_stmt->expr->type) > 0)
+        {
+            fail(*n.exit_stmt, "cannot exit with struct type '" + n.exit_stmt->expr->type + "'");
+        }
+    }
 
     // Append generated lambda structs so codegen sees them
     for (auto& gs : generated_structs)
@@ -652,11 +676,21 @@ llvm::Value* SemanticChecker::visit_asmt(AsmtNode& n)
 
 llvm::Value* SemanticChecker::visit_exit(ExitNode& n)
 {
-    check_expr(n.expr);
-    reject_lambda_value(*n.expr, "returned");
-    if (current_fn)
+    if (n.expr)
     {
-        check_assignable(*n.expr, current_fn->return_type, n, "return");
+        check_expr(n.expr);
+        reject_lambda_value(*n.expr, "returned");
+        if (current_fn)
+        {
+            check_assignable(*n.expr, current_fn->return_type, n, "return");
+        }
+        else
+        {
+            if (structs.count(n.expr->type) > 0)
+            {
+                fail(n, "cannot exit with struct type '" + n.expr->type + "'");
+            }
+        }
     }
     return nullptr;
 }
@@ -743,11 +777,6 @@ llvm::Value* SemanticChecker::visit_binop(BinaryOpNode& n)
 
 llvm::Value* SemanticChecker::visit_fn_call(FunctionCallNode& n)
 {
-    //lookup_name() then lookup or in other words get the declaration of this variable with function name if it exsits
-    // if it exists check if the struct of this type has member function call
-    // if it does then swap it to name.call()
-    // and then visit the structs memeber function call()
-
     if (current_struct_info)
     {
         auto mit = current_struct_info->member_fns.find(n.name);
@@ -945,12 +974,8 @@ llvm::Value* SemanticChecker::visit_read(ReadNode& n)
 
 llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
 {
-    // Guard: don't lower twice (LambdaNode stays in tree)
     if (L.lowered_struct) return nullptr;
 
-    // -------------------------------------------------------
-    // 1. Resolve captures
-    // -------------------------------------------------------
     std::set<std::string> seen_caps;
     bool any_mut = false;
     std::vector<std::unique_ptr<FieldDeclNode>>    field_nodes;
@@ -968,13 +993,12 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
         if (res.kind == LookupResult::NotFound)
             fail(*cap, "cannot capture '" + cap->name + "': no variable '" + cap->name + "' is visible here");
 
-        // Determine the type of the captured variable
         std::string cap_type;
         if (res.kind == LookupResult::LocalVar)
         {
             cap_type = res.decl->type_name;
         }
-        else // FieldOfThis
+        else
         {
             cap_type = res.field_type;
         }
@@ -991,9 +1015,6 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
         init_items.push_back(make_unique<VarNameNode>(cap->line, cap->col, cap->name));
     }
 
-    // -------------------------------------------------------
-    // 2. Check signature (params and return type)
-    // -------------------------------------------------------
     if (!is_known_type(L.return_type))
         fail(L, "unknown return type '" + L.return_type + "'");
 
@@ -1009,17 +1030,12 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
         param_names.insert(p->name);
     }
 
-    // -------------------------------------------------------
-    // 3. Build the generated struct
-    // -------------------------------------------------------
-    // Generate a unique struct name: "lambda.<name>" or "lambda.<name>.<N>"
     std::string sname = "lambda." + L.name;
     if (structs.count(sname))
     {
         sname = "lambda." + L.name + "." + std::to_string(++lambda_counter);
     }
 
-    // Build the call member function node (take ownership of params & body from L)
     std::vector<std::unique_ptr<FuncParamNode>> call_params;
     for (auto& p : L.params)
     {
@@ -1038,11 +1054,9 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
     StructDeclNode* struct_node = struct_node_uptr.get();
     MemberFnDeclNode* call_node = call_node_uptr.get();
 
-    // Add the call fn to the struct
     call_node->struct_decl = struct_node;
     struct_node->member_fns.push_back(std::move(call_node_uptr));
 
-    // Register struct info (without call yet — added after body check)
     StructInfo sinfo;
     sinfo.name = sname;
     sinfo.is_lambda = true;
@@ -1050,11 +1064,7 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
     sinfo.field_index = field_index_map;
     structs[sname] = std::move(sinfo);
 
-    // -------------------------------------------------------
-    // 4. Check the lambda body in a fresh scope, with captures as fields
-    // -------------------------------------------------------
     {
-        // Save all state we will modify
         auto saved_scopes         = scopes;
         auto saved_struct_info    = current_struct_info;
         auto saved_struct_node    = current_struct_node;
@@ -1062,22 +1072,19 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
         auto saved_member_fn      = current_member_fn;
         auto saved_in_member_pass = in_member_body_pass;
 
-        // Install a fresh scope (captures arrive via 'this')
         scopes = { Scope{} };
         current_struct_info  = &structs[sname];
         current_struct_node  = struct_node;
         current_fn           = call_node;
         current_member_fn    = call_node;
-        in_member_body_pass  = false; // body runs in Phase 7 context
+        in_member_body_pass  = false;
 
-        // Push a hint so fail_unknown_name gives helpful messages
         lambda_hints.push_back({L.name, saved_scopes, saved_struct_info});
 
         visit_member_fn_decl(*call_node);
 
         lambda_hints.pop_back();
 
-        // Restore all state
         scopes              = std::move(saved_scopes);
         current_struct_info = saved_struct_info;
         current_struct_node = saved_struct_node;
@@ -1086,18 +1093,9 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
         in_member_body_pass = saved_in_member_pass;
     }
 
-    // -------------------------------------------------------
-    // 5. Register call in member_fns (after body check)
-    // -------------------------------------------------------
     structs[sname].member_fns["call"] = call_node;
-
-    // Determine mutates: does the call body write to any capture (field)?
-    // visit_member_fn_decl already called — if it mutates, directly_mutates has it
     call_node->mutates = directly_mutates.count(call_node) > 0;
 
-    // -------------------------------------------------------
-    // 6. Build the closure variable declaration
-    // -------------------------------------------------------
     auto init_node_ptr = make_unique<InitNode>(L.line, L.col, std::move(init_items));
     auto decl = make_unique<DeclNode>(
         L.line, L.col, sname, L.name, any_mut, std::move(init_node_ptr));
@@ -1105,15 +1103,11 @@ llvm::Value* SemanticChecker::visit_lambda(LambdaNode& L)
     L.lowered_struct = struct_node;
     L.lowered_decl   = std::move(decl);
 
-    // -------------------------------------------------------
-    // 7. Collect the generated struct and visit the closure decl
-    // -------------------------------------------------------
     generated_structs.push_back(std::move(struct_node_uptr));
     L.lowered_decl->accept(*this);
 
     return nullptr;
 }
-
 
 llvm::Value* SemanticChecker::visit_init(InitNode& n)
 {
