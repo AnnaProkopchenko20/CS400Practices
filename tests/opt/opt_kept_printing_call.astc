@@ -1,0 +1,13 @@
+Program
+  Fn noisy -> i32
+    Param v i32
+    Block
+      Print
+        Var v
+      Exit
+        Var v
+  Decl keep i32 const
+    Call noisy
+      Const 4
+  Exit
+    Const 0

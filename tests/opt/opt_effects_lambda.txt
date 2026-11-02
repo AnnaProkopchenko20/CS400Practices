@@ -1,0 +1,12 @@
+fn loudl := [](i32 v) -> i32
+{
+    print(v)
+    exit v
+}
+fn quietl := [](i32 v) -> i32
+{
+    exit v
+}
+i32 a {loudl(1)}
+i32 b {quietl(2)}
+exit 0

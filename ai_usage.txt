@@ -1441,3 +1441,32 @@ Prompt 2 (Implementation and Verification):
   * Verified all sample programs from w08-practice.pdf (Task 1 sample, Task 2 sample, and Additional Task sample) run and produce exact expected outputs through LLVM lli.
   * Created 14 valid test programs (tests/ok/p8_v01 - p8_v14) and 13 error test programs (tests/err/p8_e01 - p8_e13) covering every aspect of Task 1, Task 2, Task 3, and Additional Task (mut captures, counter, mut capture in loop, two lambdas with independent copies, const + mut captures in one list, and const capture mutation error).
   * Validated that all 174 test cases pass with 0 failures under bash run.sh.
+
+
+===============================================================================
+AI Usage Log - Practice 9: Optimization Pass (Dead Code Elimination)
+===============================================================================
+
+Tools Used:
+- Claude (Anthropic)
+
+links:
+https://claude.ai/share/32c1676d-6baf-41ab-a0de-edd704ce8c1d
+https://claude.ai/share/556a0a16-3a5a-4531-b39f-2f0321642402
+
+Prompts & Iterative Intent:
+- Discussed compiler optimization architecture for dead variable and dead function removal on AST level
+- Explored options for side-effect analysis (EffectOracle fixpoint algorithm over function call graph, cycle reachability, mutating member functions)
+- Discussed memory reclamation measurement strategies suitable for C++ ASTs (`Node::live` static counter)
+- Requested code generation scripts (`apply_practice9.sh`) for visitor skeletons and test harness setu
+
+What Was Taken As-Is:
+- High-level architecture layout for the optimization module (`src/optimizer/`: `WalkVisitor`, `EffectOracle`, `VariableUseCounter`, `UnusedVariableRemover`, `FunctionUseCounter`, `UnusedFunctionRemover`)
+- Algorithm logic for recursive call graph effect propagation via fixpoint analysis in `effects.cpp`
+
+What Was Changed & Written Independently:
+- Fixed C++ type conversion issues, raw pointer nullability checks, and build includes in `src/optimizer/`
+- Refined lambda AST node traversal (`WalkVisitor::visit_lambda`) to walk only capture initializers (`lowered_decl`), delegating lambda body checking strictly to `program->structs` to eliminate double-counting
+- Added CLI option handling in `main.cpp` for `--remove-unused`, `--keep-calls`, and `--opt-stats` flags
+- Created test cases in `tests/opt/` covering shadowed variables, printing call preservation, sibling member calls, lambda captures, and call-graph effect propagation
+- Verified AST node deallocation statistics (`Node::live`) under AddressSanitizer (`-fsanitize=address`)
