@@ -1,0 +1,14 @@
+i32 mut total {0}
+i32 mut i {1}
+i32 n {3}
+while i == 1
+{
+fn sq := [n](i32 x) -> i32
+{
+i32 r{x + x + x}
+exit r
+}
+total := total + sq(n)
+i := 0
+}
+exit total

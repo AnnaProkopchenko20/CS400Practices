@@ -1,0 +1,15 @@
+i32 mut v {0}
+fn fa := [mut v]() -> i32
+{
+v := v + 10
+exit v
+}
+fn fb := [mut v]() -> i32
+{
+v := v + 1
+exit v
+}
+i32 a {fa()}
+i32 b {fb()}
+i32 result {a + b}
+exit result

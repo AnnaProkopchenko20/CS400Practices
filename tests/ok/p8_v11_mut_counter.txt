@@ -1,0 +1,10 @@
+i32 mut n {0}
+fn inc := [mut n]() -> i32
+{
+n := n + 1
+exit n
+}
+i32 a {inc()}
+i32 b {inc()}
+i32 result {a + b}
+exit result

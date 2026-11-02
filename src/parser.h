@@ -5,6 +5,7 @@
 
 #include "ast.h"
 #include "fn_param_node.h"
+// lambda_node.h already included via ast.h
 #include "keywords.h"
 #include "lexer.h"
 
@@ -61,6 +62,10 @@ private:
     std::unique_ptr<FunctionDeclNode> parse_fn_decl();
     std::unique_ptr<MemberFnDeclNode> parse_member_fn();
     std::vector<std::unique_ptr<FuncParamNode>> parse_params();
+    // Practice 8: lambda parsing
+    bool at_lambda() const;
+    std::unique_ptr<LambdaNode> parse_lambda();
+    std::vector<std::unique_ptr<LambdaCapture>> parse_captures();
     std::vector<std::unique_ptr<ExprNode>>      parse_args();
     std::unique_ptr<FuncParamNode>    parse_param();
     std::unique_ptr<InitNode>         parse_init();

@@ -1,0 +1,14 @@
+struct Triple
+{
+i32 x
+fn call := (i32 n) -> i32
+{
+i32 r{n + n + n}
+exit r
+}
+}
+Triple t {0}
+i32 a {t(14)}
+i32 b {t.call(7)}
+i32 result {a + b}
+exit result

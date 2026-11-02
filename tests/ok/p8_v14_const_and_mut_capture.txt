@@ -1,0 +1,12 @@
+i32 base {10}
+i32 mut count {0}
+fn bump := [base, mut count](i32 inc) -> i32
+{
+count := count + inc
+i32 r{base + count}
+exit r
+}
+i32 a {bump(2)}
+i32 b {bump(3)}
+i32 r {a + b}
+exit r

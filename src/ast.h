@@ -28,3 +28,5 @@
 #include "nodes/print_node.h"
 #include "nodes/read_node.h"
 #include "nodes/program_node.h"
+#include "nodes/lambda_capture.h"
+#include "nodes/lambda_node.h"

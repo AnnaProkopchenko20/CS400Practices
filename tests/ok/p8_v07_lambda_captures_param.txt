@@ -1,0 +1,11 @@
+fn make_adder := (i32 base) -> i32
+{
+fn add := [base](i32 x) -> i32
+{
+i32 r{x + base}
+exit r
+}
+exit add(10)
+}
+i32 r {make_adder(5)}
+exit r

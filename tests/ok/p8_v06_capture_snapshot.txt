@@ -1,0 +1,8 @@
+i32 mut n {1}
+fn get_n := [n]() -> i32
+{
+exit n
+}
+n := 99
+i32 r {get_n()}
+exit r

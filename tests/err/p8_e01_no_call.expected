@@ -1,0 +1,1 @@
+compilation error: line 7:8: 'p' is not callable: P has no member function 'call'

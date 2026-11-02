@@ -19,6 +19,7 @@ struct StructInfo {
     std::vector<FieldInfo> fields;
     std::map<std::string, int> field_index;
     std::map<std::string, MemberFnDeclNode*> member_fns;
+    bool is_lambda = false;
 };
 
 class SemanticChecker : public Visitor
@@ -48,6 +49,7 @@ public:
     llvm::Value* visit_print(PrintNode& n)                  override;
     llvm::Value* visit_read(ReadNode& n)                    override;
     llvm::Value* visit_init(InitNode& n)                    override;
+    llvm::Value* visit_lambda(LambdaNode& n)                override;
 
     std::map<std::string, StructInfo> structs;
 
@@ -71,8 +73,20 @@ private:
         MemberFnDeclNode* target;
         bool chain_is_mut;
         bool has_const_field_link;
+        bool is_sugar = false;
+        std::string display_name;
     };
     std::vector<DeferredCall> deferred_calls;
+
+    // Practice 8 lambda state
+    struct LambdaHint {
+        std::string name;
+        std::vector<Scope> outer_scopes;
+        StructInfo* outer_struct;
+    };
+    std::vector<LambdaHint> lambda_hints;
+    std::vector<std::unique_ptr<StructDeclNode>> generated_structs;
+    int lambda_counter = 0;
 
     [[noreturn]] void fail(int line, int col, const std::string& msg);
     [[noreturn]] void fail(const Node& at, const std::string& msg);
@@ -95,6 +109,9 @@ private:
 
     void check_expr(std::unique_ptr<ExprNode>& slot);
     void maybe_rewrite_field(std::unique_ptr<ExprNode>& slot);
+    void maybe_rewrite_callable_call(std::unique_ptr<ExprNode>& slot);
+    void reject_lambda_value(const ExprNode& expr, const std::string& role);
+    void fail_unknown_name(const Node& at, const std::string& name);
     void validate_lvalue(ExprNode& expr, const Node& at);
 
     bool is_chain_mut(const ExprNode& expr);

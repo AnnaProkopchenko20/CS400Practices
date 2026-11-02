@@ -1,0 +1,7 @@
+i32 k {5}
+fn add_k := [](i32 x) -> i32
+{
+i32 r{x + k}
+exit r
+}
+exit add_k(3)

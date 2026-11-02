@@ -40,6 +40,12 @@ public:
         if (b == ',') { ctx.emit("comma", ",", ctx.line, ctx.col); return true; }
         if (b == '.') { ctx.emit("dot",   ".", ctx.line, ctx.col); return true; }
 
+        // Practice 8: bracket tokens for lambda capture lists
+        if (b == '[' || b == ']')
+        {
+            ctx.emit("bracket", std::string(1, (char)b), ctx.line, ctx.col);
+            return true;
+        }
         if (b == '+' || b == '*')
         {
             ctx.emit("operator", std::string(1, (char)b), ctx.line, ctx.col);

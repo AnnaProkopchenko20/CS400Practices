@@ -1,0 +1,21 @@
+struct F
+{
+i32 k
+fn call := (i32 n) -> i32
+{
+i32 r{n + k}
+exit r
+}
+}
+struct Wrapper
+{
+F inner
+fn apply := (i32 v) -> i32
+{
+exit inner.call(v)
+}
+}
+F f {3}
+Wrapper w {f}
+i32 r {w.apply(7)}
+exit r

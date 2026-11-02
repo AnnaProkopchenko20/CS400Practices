@@ -1370,3 +1370,74 @@ Prompt 12 (Execution Continuation):
 AND ANOTHER WEB AI CHAT LINK:
 used ai to discuss implementation architecture ideas and make a prompt for agi
 https://claude.ai/share/b71c2cfa-c6fd-42dc-83cc-add1106c82c3
+
+================================================================================
+PRACTICE 8 (CALLABLE OBJECTS, LAMBDAS, AND MUT CAPTURES)
+================================================================================
+
+MAIN CHAT THAT PRECEDED THE AGI USE: https://claude.ai/share/dbe18044-24c1-4ff8-8e9d-52ff705cbc52
+(discussing the main implementation idea then put the prompt to agi and then reviewed the produced code)
+
+1. TOOLS USED
+-------------
+- Claude Sonnet 3.7 / Claude Sonnet 4.6 / Gemini 3.8 Flash (High) via Antigravity AI pair programming agent.
+- Antigravity IDE tools: bash/shell commands in WSL (Ubuntu), code review, build and test runners.
+
+2. KEY PROMPTS
+-------------
+Prompt 1 (Practice 8 Initial Specification & Architecture Scope):
+"# Task: implement Practice 8 (callable objects and lambdas) in my compiler
+
+## Context
+I am a student building a compiler for a small language in a Languages and Compilers Design course (CS400), in C++ with the LLVM IRBuilder API. The pipeline is: lexer, parser (AST), semantic checker (a visitor), code generator (a visitor). Earlier practices already work: structs with fields, member functions, mut/const rules, read(), print. Everything from earlier practices must keep working.
+
+Practice 8 adds:
+1. Callable objects: A struct that declares a member function call can be called like a function: triple(14) means triple.call(14). The longer form stays legal. It is a semantic rewrite into a member call, so code generation does not change for it.
+2. Lambdas: fn name := [captures](params) -> type followed by a block, written where a statement stands. Captures are copies taken at the declaration. The compiler lowers a lambda to a generated struct named lambda.<name> (one field per capture, in order), a member function call, and an instance name of that struct.
+3. Mut captures (Additional task, +1): [mut n] gives the lambda its own mutable copy of n (the field of the struct is mut). The closure variable is mut when one of its captures is mut. Original variable never changes.
+4. Error checking: 'twice' is both a variable and a function; 'p' is not callable; 'n' is not callable; cannot call 'c': its 'call' changes it and it is not mut; 'k' is not captured by lambda 'add_k'; cannot assign to 'k': the capture 'k' is const, write [mut k]; 'k' is captured twice; cannot capture 'k': no variable 'k' is visible here; 'times' is a lambda and cannot be passed to 'sq'; etc.
+5. Tests: ok and err tests covering all tasks and additional task.
+6. --ast-checked flag to dump AST after semantic checking."
+
+Prompt 2 (Implementation and Verification):
+"continue where left off be efficient with tokens"
+"continue, at which stage are you right now? try to minimize token usage"
+"finishup"
+
+3. CODE ACCEPTED AS-IS
+---------------------
+- AST Node definitions for Practice 8:
+  * LambdaCapture (src/nodes/lambda_capture.h): tracking capture location, identifier name, and is_mut flag.
+  * LambdaNode (src/nodes/lambda_node.h): statement node capturing lambda parameters, return type, capture list, and body; holding references to lowered struct and declaration.
+- Parser Grammar Extensions (src/parser.cpp, src/parser.h):
+  * Lambda syntax parsing: at_lambda(), parse_lambda(), parse_captures().
+  * Support for lambda statements at top-level program and inside nested blocks.
+  * Rejection of captures on struct member functions and non-lambda function declarations inside blocks.
+- Semantic Checker Lowering & Rules (src/semantic_checker.cpp, src/semantic_checker.h):
+  * RAII state guard (StateGuard) ensuring proper scope and current function/struct context restoration during lambda body checking.
+  * Callable object resolution (maybe_rewrite_callable_call): detecting when a function call name resolves to a visible variable, field of this, or chained field, and rewriting into MemberCallNode calling call.
+  * Rejection of names that are simultaneously a variable and a function at call site.
+  * Lambda lowering in visit_lambda: capture visibility checks, duplicate checks, parameter clash checks, generating synthetic struct lambda.<name>, creating member function call, type checking lambda body in isolated scope, registering directly mutating calls, and generating the closure variable declaration.
+  * Lambda value restrictions: reject_lambda_value preventing lambdas from being passed as function arguments, returned from exit, assigned, printed, or used in standard variable declarations.
+  * Scope isolation error messaging ('k' is not captured by lambda 'add_k': add it to the capture list, [k]).
+- Code Generation (src/codegen.cpp, src/codegen.h):
+  * visit_lambda delegation to lowered declaration node.
+  * Special case in member_fn_ir_name for lambda. structs to produce clean IR function names (e.g. @"lambda.add_k_call").
+- Driver Flag (src/main.cpp):
+  * Added --ast-checked command-line option to dump the lowered AST after semantic validation.
+
+4. CODE MODIFIED OR WRITTEN MANUALLY
+-----------------------------------
+- Member Call & Callable Field Refinement:
+  * Extended MemberCallNode in src/semantic_checker.cpp to support calling callable fields directly (e.g., s.scale(7) on struct Shape { Scale scale; ... }) and calling callable fields from inside member functions.
+  * Added mutual exclusivity check when an object contains both a field and a member function with the same name.
+  * Ensured argument error reporting on callable objects names the callable object rather than "call" (e.g., 'scale' takes 1 argument(s), got 0).
+- AST Dump Spec Alignment (src/nodes/member_fn_call_node.h, src/nodes/program_node.h):
+  * Refined MemberCallNode::dump when is_callable_sugar is true to output CallableCall <name> with its arguments at d+1, omitting the redundant inner variable node to match the specification on page 3 of w08-practice.pdf.
+  * Refined ProgramNode::dump to avoid duplicating generated lambda. structs at the top level of the program dump, as they are already printed in place inside their respective LambdaNode.
+- Warning and Diagnostics Cleanup:
+  * Resolved -Wmissing-field-initializers and unused variable warnings in semantic_checker.cpp to ensure 100% clean compilation.
+- Test Suite & Specification Validation:
+  * Verified all sample programs from w08-practice.pdf (Task 1 sample, Task 2 sample, and Additional Task sample) run and produce exact expected outputs through LLVM lli.
+  * Created 14 valid test programs (tests/ok/p8_v01 - p8_v14) and 13 error test programs (tests/err/p8_e01 - p8_e13) covering every aspect of Task 1, Task 2, Task 3, and Additional Task (mut captures, counter, mut capture in loop, two lambdas with independent copies, const + mut captures in one list, and const capture mutation error).
+  * Validated that all 174 test cases pass with 0 failures under bash run.sh.

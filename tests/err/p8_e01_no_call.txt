@@ -1,0 +1,8 @@
+struct P
+{
+i32 x
+i32 y
+}
+P p {1, 2}
+i32 r {p(3)}
+exit r

@@ -34,3 +34,5 @@ struct FieldAccessNode;
 struct MemberAccessNode;
 struct PrintNode;
 struct ReadNode;
+struct LambdaCapture;
+struct LambdaNode;
