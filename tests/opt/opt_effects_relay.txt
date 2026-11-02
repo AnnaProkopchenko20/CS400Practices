@@ -1,0 +1,12 @@
+fn shout := (i32 v) -> i32
+{
+    print(v)
+    exit v
+}
+fn relay := (i32 v) -> i32
+{
+    i32 t {shout(v)}
+    exit t
+}
+i32 r {relay(3)}
+exit 0

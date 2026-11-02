@@ -1,0 +1,8 @@
+i32 base {10}
+fn add := [base](i32 v) -> i32
+{
+    i32 s {base + v}
+    exit s
+}
+i32 r {add(5)}
+exit r

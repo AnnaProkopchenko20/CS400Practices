@@ -1,0 +1,17 @@
+struct S
+{
+    i32 x
+    fn twice := (i32 v) -> i32
+    {
+        i32 t {v * 2}
+        exit t
+    }
+    fn quad := (i32 v) -> i32
+    {
+        i32 t {twice(v)}
+        exit t
+    }
+}
+S s {3}
+i32 r {s.quad(4)}
+exit r

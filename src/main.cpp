@@ -12,23 +12,37 @@
 #include "ast.h"
 #include "codegen.h"
 #include "lexer.h"
+#include "optimizer/pipeline.h"
 #include "parser.h"
 #include "semantic_checker.h"
 
+// Flags may appear anywhere on the command line:
+//   --ast             print the PARSE tree (before the checker) and stop
+//   --ast-checked     print the tree after the checker (and after the pass, if requested)
+//   --tokens          print tokens
+//   --remove-unused   Practice 9: remove unused variables and functions after the checker
+//   --keep-calls      with --remove-unused: Task 1 rule, keep every value that has a call
+//   --opt-stats       with --remove-unused: print rounds and live-node counts to stderr
 int main(int argc, char* argv[])
 {
-    bool print_ast     = false;
+    bool print_ast         = false;
     bool print_ast_checked = false;
-    bool print_tokens  = false;
+    bool print_tokens      = false;
+    bool remove_unused_on  = false;
+    bool keep_calls        = false;
+    bool opt_stats         = false;
     std::vector<std::string> args;
 
     for (int i = 1; i < argc; ++i)
     {
         std::string arg = argv[i];
-        if      (arg == "--ast")         { print_ast         = true; }
-        else if (arg == "--ast-checked")  { print_ast_checked = true; }
-        else if (arg == "--tokens") { print_tokens = true; }
-        else                        { args.push_back(arg); }
+        if      (arg == "--ast")            { print_ast         = true; }
+        else if (arg == "--ast-checked")    { print_ast_checked = true; }
+        else if (arg == "--tokens")         { print_tokens      = true; }
+        else if (arg == "--remove-unused")  { remove_unused_on  = true; }
+        else if (arg == "--keep-calls")     { keep_calls        = true; }
+        else if (arg == "--opt-stats")      { opt_stats         = true; }
+        else                                { args.push_back(arg); }
     }
 
     if (args.empty()) { std::cerr << "Expected at least an input file\n"; return 1; }
@@ -58,10 +72,25 @@ int main(int argc, char* argv[])
         Parser parser(token_lines);
         auto program = parser.parse_program();
 
+        // --ast is the parse tree: print it before the checker rewrites anything.
+        if (print_ast && !print_ast_checked) { program->dump(0); return 0; }
+
         SemanticChecker checker;
         program->accept(checker);
 
-        if (print_ast) { program->dump(0); return 0; }
+        // Practice 9: the pass runs only on a tree the checker has accepted.
+        if (remove_unused_on)
+        {
+            int live_before = Node::live;
+            OptStats st = remove_unused(*program, keep_calls);
+            if (opt_stats)
+            {
+                std::cerr << "[opt] rounds=" << st.rounds
+                          << " removed_stmts=" << st.removed_stmts
+                          << " removed_functions=" << st.removed_fns
+                          << " live_nodes " << live_before << " -> " << Node::live << "\n";
+            }
+        }
 
         if (print_ast_checked) { program->dump(0); return 0; }
 

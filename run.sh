@@ -2,7 +2,11 @@
 # Build the compiler, run every tests/ok/*.txt and tests/err/*.txt and compare with its .expected file.
 # Valid program  -> expected = what `lli` prints
 # Invalid program -> expected = the compiler's stderr line
-# Optional: tests/NAME.ast is compared with `compiler --ast`.
+# Optional: tests/NAME.ast is compared with `compiler --ast` (the PARSE tree).
+#
+# OPT=1 ./run.sh   -> every test is compiled with --remove-unused; the same .expected files must match.
+# tests/opt/NAME.txt  ->  NAME.astc  = `--remove-unused --ast-checked`,
+#                         NAME.expected = output, identical with and without the flag.
 
 set -e
 mkdir -p build
@@ -11,6 +15,9 @@ set +e
 
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 pass=0; fail=0
+
+FLAG=""
+if [ -n "$OPT" ]; then FLAG="--remove-unused"; echo "(running every test with $FLAG)"; fi
 
 check() {  # label actual_file expected_file
     if [ ! -f "$3" ]; then
@@ -26,7 +33,7 @@ for t in tests/ok/*.txt tests/err/*.txt; do
     base="${t%.txt}"; name=$(basename "$base")
     rm -f "$tmp/out.ll"
 
-    ./build/compiler "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
+    ./build/compiler $FLAG "$t" "$tmp/out.ll" > /dev/null 2> "$tmp/actual"
     if [ $? -eq 0 ]; then
         if [ -f "$base.in" ]; then
             lli "$tmp/out.ll" < "$base.in" > "$tmp/actual" 2>&1
@@ -50,6 +57,30 @@ for t in tests/ok/*.txt tests/err/*.txt; do
             echo "FAIL     $name [ircheck]"; cat "$tmp/iractual"; fail=$((fail+1))
         fi
     fi
+done
+
+# --- Practice 9: tests/opt ---------------------------------------------------
+run_prog() {  # flag base out_file
+    rm -f "$tmp/opt.ll"
+    ./build/compiler $1 "$2.txt" "$tmp/opt.ll" > /dev/null 2> "$3"
+    if [ $? -eq 0 ]; then
+        if [ -f "$2.in" ]; then lli "$tmp/opt.ll" < "$2.in" > "$3" 2>&1
+        else lli "$tmp/opt.ll" > "$3" 2>&1; fi
+    fi
+}
+
+for t in tests/opt/*.txt; do
+    [ -e "$t" ] || continue
+    base="${t%.txt}"; name="opt/$(basename "$base")"
+
+    ./build/compiler --remove-unused --ast-checked "$t" > "$tmp/astc" 2>&1
+    check "$name [astc]" "$tmp/astc" "$base.astc"
+
+    run_prog "" "$base" "$tmp/plain"
+    check "$name [without flag]" "$tmp/plain" "$base.expected"
+
+    run_prog "--remove-unused" "$base" "$tmp/flagged"
+    check "$name [with flag]" "$tmp/flagged" "$base.expected"
 done
 
 echo "-----------------------------"
