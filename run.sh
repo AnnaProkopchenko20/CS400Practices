@@ -83,6 +83,42 @@ for t in tests/opt/*.txt; do
     check "$name [with flag]" "$tmp/flagged" "$base.expected"
 done
 
+# --- Practice 10: native terminal sessions -----------------------------------
+for t in tests/io/*.txt tests/ffi/*.txt; do
+    [ -f "$t" ] || continue
+    base="${t%.txt}"
+    name="${base#tests/}"
+    link_sources=()
+    if [[ "$t" == tests/ffi/* ]]; then
+        link_sources+=("$base.c")
+    fi
+    if ! ./build/compiler $FLAG "$t" "$tmp/io.ll" ||
+       ! llc -filetype=obj -relocation-model=pic "$tmp/io.ll" -o "$tmp/io.o" ||
+       ! clang -fPIE "$tmp/io.o" "${link_sources[@]}" -o "$tmp/io-program"; then
+        echo "FAIL     $name (native build failed)"
+        fail=$((fail+1))
+        continue
+    fi
+
+    found_session=false
+    for input in "$base".*.in; do
+        [ -f "$input" ] || continue
+        found_session=true
+        session="${input%.in}"
+        label="${session#tests/}"
+        if "$tmp/io-program" < "$input" > "$tmp/actual"; then
+            check "$label" "$tmp/actual" "$session.expected"
+        else
+            echo "FAIL     $label (binary exited unsuccessfully)"
+            fail=$((fail+1))
+        fi
+    done
+    if ! "$found_session"; then
+        echo "FAIL     $name (no input sessions)"
+        fail=$((fail+1))
+    fi
+done
+
 echo "-----------------------------"
 echo "passed: $pass   failed: $fail"
 [ "$fail" -eq 0 ]

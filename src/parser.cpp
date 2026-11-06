@@ -189,6 +189,13 @@ std::unique_ptr<ProgramNode> Parser::parse_program()
                 throw error_at(toks[0], "struct declarations come before functions");
             structs.push_back(parse_struct_decl());
         }
+        else if (at("keyword", kw::EXTERN))
+        {
+            if (section > ProgramSection::Functions)
+                throw error_at(toks[0], "function declarations come before the statements");
+            section = ProgramSection::Functions;
+            functions.push_back(parse_fn_decl(true));
+        }
         else if (at("keyword", kw::FN))
         {
             if (at_lambda())
@@ -334,9 +341,11 @@ std::vector<std::unique_ptr<ExprNode>> Parser::parse_args()
 }
 
 // fn ::= "fn" ident ":=" "(" [ param { "," param } ] ")" "->" type NL block
-std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
+std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl(bool external)
 {
     Token kw_tok = eat();
+    if (external)
+        expect("keyword", kw::FN, "'fn'");
     Token name   = expect("identifier", "", "a function name");
     expect("operator", ":=", "':='");
     expect("parentheses", "(", "'('");
@@ -346,8 +355,18 @@ std::unique_ptr<FunctionDeclNode> Parser::parse_fn_decl()
     Token ret_type = expect_type();
     end_of_line();
 
-    auto body = parse_block(kw::FN);
-    if (!body->exit_stmt)
+    std::unique_ptr<BlockNode> body;
+    if (external)
+    {
+        const auto* next = peek_line();
+        if (next && next->front().text == "{")
+            throw error_at(next->front(), "extern function '" + name.text + "' has no body: it is defined in C");
+    }
+    else
+    {
+        body = parse_block(kw::FN);
+    }
+    if (body && !body->exit_stmt)
         throw error_at(kw_tok, "function '" + name.text + "' must end with 'exit'");
 
     return make_unique<FunctionDeclNode>(
@@ -393,6 +412,8 @@ std::unique_ptr<FuncParamNode> Parser::parse_param()
 // statement ::= declaration | assignment | if_stmt | while_stmt | print_stmt
 std::unique_ptr<StmtNode> Parser::parse_statement()
 {
+    if (at("keyword", kw::EXTERN))
+        throw error_at(*peek(), "'extern' is not allowed here");
     if (at_decl())                { auto s = parse_decl();   end_of_line(); return s; }
     if (at("identifier"))         { auto s = parse_assign(); end_of_line(); return s; }
     if (at("keyword", kw::IF))    { return parse_if(); }

@@ -36,6 +36,7 @@ namespace
 
         llvm::Value* visit_fn_decl(FunctionDeclNode& n) override
         {
+            if (n.is_extern()) direct.insert(&n);
             enter(n);
             return nullptr;
         }

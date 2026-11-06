@@ -1,4 +1,5 @@
 #include "semantic_checker.h"
+#include "codegen.h"
 
 #include <cerrno>
 #include <cstdint>
@@ -475,6 +476,10 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
     }
 
     // Phase 3: Register global functions
+    std::set<std::string> reserved_symbols{"main", "printf", "scanf"};
+    for (const auto& s : n.structs)
+        for (const auto& m : s->member_fns)
+            reserved_symbols.insert(CodeGen::member_fn_ir_name(s->name, m->name));
     for (auto& fn : n.functions)
     {
         check_new_name(*fn, fn->name);
@@ -482,6 +487,18 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
             fail(*fn, "'" + fn->name + "' is already declared");
         if (functions.count(fn->name))
             fail(*fn, "function '" + fn->name + "' is already declared");
+        if (fn->is_extern())
+        {
+            if (reserved_symbols.count(fn->name))
+                fail(*fn, "'" + fn->name + "' is a name the compiler already uses in the module");
+            if (fn->return_type != kw::I32 && fn->return_type != kw::I64)
+                fail(*fn, "extern function '" + fn->name + "' returns '" + fn->return_type
+                    + "': only i32 and i64 cross into C");
+            for (const auto& p : fn->params)
+                if (p->type_name != kw::I32 && p->type_name != kw::I64)
+                    fail(*p, "parameter '" + p->name + "' of extern function '" + fn->name
+                        + "' has type '" + p->type_name + "': only i32 and i64 cross into C");
+        }
         if (!is_known_type(fn->return_type))
             fail(*fn, "unknown return type '" + fn->return_type + "'");
 
@@ -560,7 +577,7 @@ llvm::Value* SemanticChecker::visit_program(ProgramNode& n)
 
     // Phase 7: Check global function bodies, top-level statements, and exit
     for (auto& fn : n.functions)
-        visit_fn_decl(*fn);
+        if (!fn->is_extern()) visit_fn_decl(*fn);
 
     scopes.clear();
     scopes.emplace_back();

@@ -59,7 +59,7 @@ private:
     std::unique_ptr<ExprNode>         parse_field_access(std::unique_ptr<ExprNode> left, const Token& name, const Token& dot_tok);
     std::unique_ptr<StructDeclNode>   parse_struct_decl();
     std::unique_ptr<FieldDeclNode>    parse_field_decl();
-    std::unique_ptr<FunctionDeclNode> parse_fn_decl();
+    std::unique_ptr<FunctionDeclNode> parse_fn_decl(bool external = false);
     std::unique_ptr<MemberFnDeclNode> parse_member_fn();
     std::vector<std::unique_ptr<FuncParamNode>> parse_params();
     // Practice 8: lambda parsing

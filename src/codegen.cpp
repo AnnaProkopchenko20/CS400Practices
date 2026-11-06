@@ -198,7 +198,7 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
         llvm::Type* ret_t = llvm_type(fn->return_type);
         llvm::FunctionType* ft = llvm::FunctionType::get(ret_t, param_types, false);
         llvm::Function* f = llvm::Function::Create(
-            ft, llvm::Function::ExternalLinkage, "fn." + fn->name, module.get());
+            ft, llvm::Function::ExternalLinkage, fn->is_extern() ? fn->name : "fn." + fn->name, module.get());
         ir_functions[fn->name] = f;
     }
 
@@ -242,7 +242,7 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
 
     // Step 6: Define global functions
     for (auto& fn : n.functions)
-        visit_fn_decl(*fn);
+        if (!fn->is_extern()) visit_fn_decl(*fn);
 
     // Step 7: Define main body
     current_fn = nullptr;

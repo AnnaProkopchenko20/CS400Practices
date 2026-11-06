@@ -1,3 +1,8 @@
+practice10 ebnf (extends practice8):
+
+program     ::= { struct } { fn | extern_fn } { statement } exit_stmt
+extern_fn   ::= "extern" "fn" ident ":=" "(" [ param { "," param } ] ")" "->" type NL
+
 practice8 ebnf:
 
 program     ::= { struct } { fn } { statement } exit_stmt

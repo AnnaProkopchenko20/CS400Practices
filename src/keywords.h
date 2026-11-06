@@ -8,6 +8,7 @@ namespace kw
     inline constexpr const char* I64    = "i64";
     inline constexpr const char* BOOL   = "bool";
 
+    inline constexpr const char* EXTERN = "extern";
     inline constexpr const char* FN     = "fn";
     inline constexpr const char* STRUCT = "struct";
 
@@ -32,7 +33,7 @@ namespace kw
             {I32,    "keyword"}, {I64,    "keyword"}, {BOOL,   "keyword"},
             {MUT,    "keyword"}, {TRUE_,  "keyword"}, {FALSE_, "keyword"},
             {IF,     "keyword"}, {ELSE,   "keyword"}, {WHILE,  "keyword"},
-            {EXIT,   "keyword"}, {FN,     "keyword"}, {STRUCT, "keyword"},
+            {EXTERN, "keyword"}, {EXIT,   "keyword"}, {FN,     "keyword"}, {STRUCT, "keyword"},
             {READ,   "keyword"}, {PRINT,     "keyword"}
         };
     }
