@@ -23,11 +23,14 @@ struct FunctionDeclNode : Node {
         , params(std::move(p))
         , body(std::move(b)) {}
 
+    bool is_extern() const { return !body; }
+
     void dump(int d) const override {
         indent(d);
+        if (is_extern()) std::cout << "Extern ";
         std::cout << "Fn " << name << " -> " << return_type << "\n";
         for (const auto& p : params) p->dump(d + 1);
-        body->dump(d + 1);
+        if (body) body->dump(d + 1);
     }
 
     llvm::Value* accept(Visitor& v) override { return v.visit_fn_decl(*this); }

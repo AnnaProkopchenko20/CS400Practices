@@ -1,0 +1,28 @@
+Program
+  Struct S
+    Member x i32 const
+    MemberFn twice -> i32
+      Param v i32
+      Block
+        Decl t i32 const
+          BinOp *
+            Var v
+            Const 2
+        Exit
+          Var t
+    MemberFn quad -> i32
+      Param v i32
+      Block
+        Decl t i32 const
+          Call twice
+            Var v
+        Exit
+          Var t
+  Decl s S const
+    Const 3
+  Decl r i32 const
+    MemberCall quad
+      Var s
+      Const 4
+  Exit
+    Var r

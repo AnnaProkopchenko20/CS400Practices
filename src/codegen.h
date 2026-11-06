@@ -66,7 +66,7 @@ struct CodeGen : Visitor
     llvm::Value* visit_init(InitNode& n)                    override;
     llvm::Value* visit_lambda(LambdaNode& n)                override;
 
-    std::string member_fn_ir_name(const std::string& struct_name, const std::string& fn_name);
+    static std::string member_fn_ir_name(const std::string& struct_name, const std::string& fn_name);
     llvm::Value* get_expr_address(ExprNode& expr);
     void emit_print_struct(llvm::Value* struct_ptr, const std::string& type_name);
 

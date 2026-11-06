@@ -1441,3 +1441,146 @@ Prompt 2 (Implementation and Verification):
   * Verified all sample programs from w08-practice.pdf (Task 1 sample, Task 2 sample, and Additional Task sample) run and produce exact expected outputs through LLVM lli.
   * Created 14 valid test programs (tests/ok/p8_v01 - p8_v14) and 13 error test programs (tests/err/p8_e01 - p8_e13) covering every aspect of Task 1, Task 2, Task 3, and Additional Task (mut captures, counter, mut capture in loop, two lambdas with independent copies, const + mut captures in one list, and const capture mutation error).
   * Validated that all 174 test cases pass with 0 failures under bash run.sh.
+
+
+===============================================================================
+AI Usage Log - Practice 9: Optimization Pass (Dead Code Elimination)
+===============================================================================
+
+Tools Used:
+- Claude (Anthropic)
+
+links:
+https://claude.ai/share/32c1676d-6baf-41ab-a0de-edd704ce8c1d
+https://claude.ai/share/556a0a16-3a5a-4531-b39f-2f0321642402
+
+Prompts & Iterative Intent:
+- Discussed compiler optimization architecture for dead variable and dead function removal on AST level
+- Explored options for side-effect analysis (EffectOracle fixpoint algorithm over function call graph, cycle reachability, mutating member functions)
+- Discussed memory reclamation measurement strategies suitable for C++ ASTs (`Node::live` static counter)
+- Requested code generation scripts (`apply_practice9.sh`) for visitor skeletons and test harness setu
+
+What Was Taken As-Is:
+- High-level architecture layout for the optimization module (`src/optimizer/`: `WalkVisitor`, `EffectOracle`, `VariableUseCounter`, `UnusedVariableRemover`, `FunctionUseCounter`, `UnusedFunctionRemover`)
+- Algorithm logic for recursive call graph effect propagation via fixpoint analysis in `effects.cpp`
+
+What Was Changed & Written Independently:
+- Fixed C++ type conversion issues, raw pointer nullability checks, and build includes in `src/optimizer/`
+- Refined lambda AST node traversal (`WalkVisitor::visit_lambda`) to walk only capture initializers (`lowered_decl`), delegating lambda body checking strictly to `program->structs` to eliminate double-counting
+- Added CLI option handling in `main.cpp` for `--remove-unused`, `--keep-calls`, and `--opt-stats` flags
+- Created test cases in `tests/opt/` covering shadowed variables, printing call preservation, sibling member calls, lambda captures, and call-graph effect propagation
+- Verified AST node deallocation statistics (`Node::live`) under AddressSanitizer (`-fsanitize=address`)
+
+===============================================================================
+AI Usage Log Update - Final Reviewer Feedback Adjustments
+===============================================================================
+
+Prompts & Iterative Intent:
+- Resolved final PR review items regarding semantic type safety and LLVM IR mangling conventions.
+- Added type validation to prevent `exit` statements from returning struct instances.
+- Added validation in struct checking to reject self-referential / recursive struct fields (e.g., `struct Node { Node next }`).
+- Corrected synthetic lambda struct symbol generation to use `@lambda.<name>_call` format.
+
+What Was Changed & Written Independently:
+- Updated `SemanticChecker::visit_exit` to verify `n.expr->type` is not a registered struct type.
+- Updated `SemanticChecker::visit_struct_decl` to fail when a field type matches the enclosing struct name.
+- Adjusted lambda struct name generation in `SemanticChecker::visit_lambda` and symbol resolution in `CodeGen::member_fn_ir_name` to produce valid `@lambda.<name>_call` symbols in LLVM IR output.
+
+
+===============================================================================
+Practice 10 — AI Usage Summary and Full Interaction Log
+===============================================================================
+
+Tool: OpenAI Codex
+
+Summary
+-------
+Codex read the Practice 10 handout, broke down the required and bonus work,
+created a blank reflection template, and later implemented the requested code
+and tests on the Ubuntu practice-10 branch. It also answered questions about
+course topics while I was getting ready to write the reflection. The reflection
+answers are mine to write. Codex supplied headings and instructions only.
+
+What was taken from the handout
+------------------------------
+The points program and the three terminal scenarios follow the handout. The
+geometry example follows the bonus specification, including calls to libc abs
+and a companion C isqrt function. Codex used integer division in the isqrt loop
+condition to avoid overflowing a squared intermediate.
+
+Chronological interaction log
+-----------------------------
+1. Prompt: Open Practice 10, brief me on the coding tasks, and create
+   reflection.md for me to fill in. Do not write code yet.
+   Result: Codex read the handout and summarized the points program, native
+   build, three I/O sessions, submission requirements, and optional C calls.
+   It created a blank reflection.md with the five prompts, the 300–600 word
+   requirement, and three slots for the examples in question 3. No compiler
+   or test-runner changes were made at this stage.
+
+2. Prompt: Implement the three required steps using the existing compiler
+   features and run.sh. Explain exactly what the bonus expects.
+   Result: Codex prepared points.txt, the sheet/none/all session fixtures, and
+   native runner changes in the Windows workspace. It used the saved Practice 9
+   runner as the baseline there. Bash syntax was checked. This first workspace
+   had older compiler sources and lacked the LLVM development configuration,
+   so it could not verify the native build. Codex explained extern syntax,
+   signature checks, raw C symbols, linking, optimizer effects, and test cases.
+
+3. Prompt: I want to write the reflection before the bonus. List the features,
+   idioms, approaches, and concepts covered by the course.
+   Result: Codex listed the practice work and lecture concepts separately,
+   with examples of concrete implementation or test behavior I could revisit.
+   It did not write any reflection answers.
+
+4. Prompts: Explain compile-time and runtime reflection separately. Check my
+   understanding of IR, binary metadata, and what the runtime exposes. Can
+   compiled and interpreted languages both have reflection? Do C# and C++
+   contain metadata?
+   Result: Codex explained the difference between generating field-specific
+   code at compile time and reading type metadata at runtime. It used the
+   course struct printer, a runtime serializer, Python attribute lookup,
+   .NET assembly metadata, and C++ RTTI and compile-time reflection as
+   examples. The C# and C++ comparison used official documentation.
+
+5. Prompts: Summarize the lexer, parser, and semantic checker separately,
+   then show a code-oriented overview. Remind me of the formal term for
+   preprocessing and the full C++ compilation pipeline.
+   Result: Codex mapped the frontend to lex(), LexerContext and state classes,
+   recursive-descent Parser methods, and SemanticChecker visitor methods.
+   It explained preprocessing tokens, directive handling and macro expansion,
+   then traced parsing, checking, IR, optimization, assembly and linking.
+
+6. Prompt: Apply Task 1 to the actual repository and implement the bonus. I
+   suggested extending the grammar, lexer, parser, AST, and code generation,
+   with attention to how the external function is resolved at link time.
+   Result: Codex located the Ubuntu practice-10 checkout, added the points
+   fixtures and blank reflection template there, and extended its actual
+   run.sh. The runner builds each I/O program as a native executable and
+   compares all session outputs exactly. For FFI tests it also links the
+   companion C source. The compiler's existing generic struct printer was
+   reused.
+
+   Codex added extern to the keyword table and EBNF. It reused the function
+   declaration node and parser signature logic, representing an external
+   declaration with an absent body. Semantic checking restricts parameters and
+   results to i32/i64 and rejects symbol collisions. Code generation creates
+   an LLVM declaration under the C symbol and skips body emission. The existing
+   call path emits the call, and clang links the C definition from libc or
+   the supplied C file. The optimizer removes unused declarations and treats
+   calls to external functions as potentially effectful.
+
+   Codex added two geometry sessions, a libc abs/llabs test, LLVM IR checks,
+   and the nine required rejection tests. During implementation it corrected
+   a misplaced parser edit, the FFI runner's companion-source argument, the
+   IR check's input argument, and two expected diagnostic columns.
+
+   Verification: 231 checks passed in each of bash run.sh and
+   OPT=1 bash run.sh. The standalone points binary matched the redirected
+   sheet session. nm showed U printf and U scanf in the object, and the LLVM
+   file contained both declarations. The keyboard demonstration was left for
+   me to perform.
+
+7. Prompt: Summarize the AI usage and include the full relevant log.
+   Result: Codex expanded the short Practice 10 entry into this summary and
+   chronological prompt-and-result log. The earlier practice logs remain above.

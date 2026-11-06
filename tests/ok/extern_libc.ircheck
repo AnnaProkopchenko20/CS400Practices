@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+grep -q '^declare i32 @abs(i32)' "$1"
+grep -q '^declare i64 @llabs(i64)' "$1"
+grep -q 'call i32 @abs(i32 -2)' "$1"
+if [ -n "$OPT" ]; then
+    if grep -q '@unused_extern' "$1"; then
+        echo 'unused extern declaration survived optimization'
+        exit 1
+    fi
+else
+    grep -q '^declare i32 @unused_extern()' "$1"
+fi

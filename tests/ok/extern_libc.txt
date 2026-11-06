@@ -1,0 +1,7 @@
+extern fn abs := (i32 v) -> i32
+extern fn llabs := (i64 v) -> i64
+extern fn unused_extern := () -> i32
+i32 ignored{abs(0 - 2)}
+i64 big{llabs(0 - 2147483649)}
+print(big)
+exit abs(0 - 7)

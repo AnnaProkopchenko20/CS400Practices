@@ -1,0 +1,7 @@
+fn noisy := (i32 v) -> i32
+{
+    print(v)
+    exit v
+}
+i32 keep {noisy(4)}
+exit 0

@@ -14,14 +14,10 @@ CodeGen::CodeGen() : builder(context)
 
 std::string CodeGen::member_fn_ir_name(const std::string& struct_name, const std::string& fn_name)
 {
-    // Lambda structs are named "lambda.<name>"; the '.' already prevents user-name clashes.
-    // Use the name directly (replacing '.' with '_') without doubling underscores.
+    // Lambda structs are named "lambda.<name>"; keep the '.' for LLVM IR name @lambda.<name>_<fn>
     if (struct_name.rfind("lambda.", 0) == 0)
     {
-        std::string s_esc;
-        for (char ch : struct_name)
-            s_esc += (ch == '.') ? '_' : ch;
-        return s_esc + "_" + fn_name;
+        return struct_name + "_" + fn_name;
     }
     if (struct_name.find('_') != std::string::npos || fn_name.find('_') != std::string::npos)
     {
@@ -202,7 +198,7 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
         llvm::Type* ret_t = llvm_type(fn->return_type);
         llvm::FunctionType* ft = llvm::FunctionType::get(ret_t, param_types, false);
         llvm::Function* f = llvm::Function::Create(
-            ft, llvm::Function::ExternalLinkage, "fn." + fn->name, module.get());
+            ft, llvm::Function::ExternalLinkage, fn->is_extern() ? fn->name : "fn." + fn->name, module.get());
         ir_functions[fn->name] = f;
     }
 
@@ -246,7 +242,7 @@ llvm::Value* CodeGen::visit_program(ProgramNode& n)
 
     // Step 6: Define global functions
     for (auto& fn : n.functions)
-        visit_fn_decl(*fn);
+        if (!fn->is_extern()) visit_fn_decl(*fn);
 
     // Step 7: Define main body
     current_fn = nullptr;
@@ -544,7 +540,7 @@ llvm::Value* CodeGen::visit_fn_call(FunctionCallNode& n)
 {
     if (auto* mfn = dynamic_cast<MemberFnDeclNode*>(n.fn_decl))
     {
-        std::string ir_name = member_fn_ir_name(current_struct->name, n.name);
+        std::string ir_name = member_fn_ir_name(mfn->struct_decl->name, n.name);
         llvm::Function* callee = ir_member_functions[ir_name];
         std::vector<llvm::Value*> args;
         args.push_back(current_this_ptr);
@@ -650,9 +646,6 @@ llvm::Value* CodeGen::visit_print(PrintNode& n)
 
 llvm::Value* CodeGen::visit_lambda(LambdaNode& L)
 {
-    // The semantic checker built lowered_decl; the generated struct is already
-    // in n.structs (appended at end of visit_program) so its type + call fn
-    // were emitted by visit_struct_decl. We just emit the closure variable.
     if (L.lowered_decl)
         return L.lowered_decl->accept(*this);
     return nullptr;
@@ -660,8 +653,6 @@ llvm::Value* CodeGen::visit_lambda(LambdaNode& L)
 
 llvm::Value* CodeGen::visit_read(ReadNode&)
 {
-    // read_slot is reset to nullptr at the start of every function, so the
-    // slot always lives in the entry block of the function being generated.
     if (!read_slot)
         read_slot = create_entry_alloca(i32_type, "read_slot");
     llvm::Value* fmt = builder.CreateGlobalStringPtr("%d", "fmt_read");
